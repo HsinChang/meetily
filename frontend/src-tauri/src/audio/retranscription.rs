@@ -419,7 +419,46 @@ async fn run_retranscription<R: Runtime>(
     emit_progress(&app, &meeting_id, "saving", 80, "Saving transcripts...");
 
     // Create transcript segments with proper timestamps from VAD
-    let segments = create_transcript_segments(&all_transcripts);
+    let mut segments = create_transcript_segments(&all_transcripts);
+
+    // Regenerate real-time Chinese translations for the re-transcribed segments
+    // when the translate-to-Chinese toggle is enabled (mirrors live recording).
+    if crate::get_translate_to_chinese_internal() {
+        emit_progress(&app, &meeting_id, "translating", 85, "Translating to Chinese...");
+        if let Ok(app_data_dir) = app.path().app_data_dir() {
+            const TRANSLATION_MODEL: &str = "qwen3.5:4b";
+            const SYSTEM_PROMPT: &str = "You are a professional translator. Translate the user's text into Simplified Chinese. Output only the translation itself, with no explanations, notes, pinyin, or quotation marks.";
+            for segment in segments.iter_mut() {
+                if segment.text.trim().is_empty()
+                    || crate::summary::language_detection::is_probably_chinese(&segment.text)
+                {
+                    continue;
+                }
+                match crate::summary::summary_engine::generate_with_builtin(
+                    &app_data_dir,
+                    TRANSLATION_MODEL,
+                    SYSTEM_PROMPT,
+                    &segment.text,
+                    None,
+                )
+                .await
+                {
+                    Ok(translated) => {
+                        let translated = translated.trim().to_string();
+                        if !translated.is_empty() {
+                            segment.translation = Some(translated);
+                        }
+                    }
+                    Err(e) => warn!(
+                        "Retranscription translation failed for segment {}: {}",
+                        segment.id, e
+                    ),
+                }
+            }
+        } else {
+            warn!("Retranscription translation skipped: could not resolve app_data_dir");
+        }
+    }
 
     // Save to database
     let app_state = app
@@ -441,8 +480,8 @@ async fn run_retranscription<R: Runtime>(
 
     for segment in &segments {
         sqlx::query(
-            "INSERT INTO transcripts (id, meeting_id, transcript, timestamp, audio_start_time, audio_end_time, duration)
-             VALUES (?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO transcripts (id, meeting_id, transcript, timestamp, audio_start_time, audio_end_time, duration, translation)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
         )
         .bind(&segment.id)
         .bind(&meeting_id)
@@ -451,6 +490,7 @@ async fn run_retranscription<R: Runtime>(
         .bind(segment.audio_start_time)
         .bind(segment.audio_end_time)
         .bind(segment.duration)
+        .bind(&segment.translation)
         .execute(&mut *tx)
         .await
         .map_err(|e| anyhow!("Failed to insert transcript: {}", e))?;

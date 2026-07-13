@@ -25,6 +25,8 @@ export interface VirtualizedTranscriptViewProps {
     enableStreaming?: boolean;
     /** Show confidence indicators */
     showConfidence?: boolean;
+    /** Show the Chinese translation line under each segment (display-only) */
+    showTranslation?: boolean;
     /** Completely disable auto-scroll behavior (for meeting details page) */
     disableAutoScroll?: boolean;
 
@@ -69,6 +71,8 @@ const TranscriptSegment = memo(function TranscriptSegment({
     timestamp,
     text,
     confidence,
+    translation,
+    showTranslation,
     isStreaming,
     showConfidence,
 }: {
@@ -76,10 +80,13 @@ const TranscriptSegment = memo(function TranscriptSegment({
     timestamp: number;
     text: string;
     confidence?: number;
+    translation?: string;
+    showTranslation: boolean;
     isStreaming: boolean;
     showConfidence: boolean;
 }) {
-    const displayText = cleanStopWords(text) || (text.trim() === '' ? '[Silence]' : text);
+    const isSilence = text.trim() === '';
+    const displayText = cleanStopWords(text) || (isSilence ? '[Silence]' : text);
 
     return (
         <div id={`segment-${id}`} className="mb-3">
@@ -104,6 +111,12 @@ const TranscriptSegment = memo(function TranscriptSegment({
                     ) : (
                         <p className="text-base text-gray-800 leading-relaxed">{displayText}</p>
                     )}
+                    {/* Real-time Chinese translation (shown when available and enabled) */}
+                    {translation && !isSilence && showTranslation && (
+                        <p className="text-sm text-blue-600/80 leading-relaxed mt-0.5 border-l-2 border-blue-200 pl-2">
+                            {translation}
+                        </p>
+                    )}
                 </div>
             </div>
         </div>
@@ -118,6 +131,7 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
     isStopping = false,
     enableStreaming = false,
     showConfidence = true,
+    showTranslation = true,
     disableAutoScroll = false,
     hasMore = false,
     isLoadingMore = false,
@@ -294,6 +308,8 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         timestamp={segment.timestamp}
                                         text={getDisplayText(segment)}
                                         confidence={segment.confidence}
+                                        translation={segment.translation}
+                                        showTranslation={showTranslation}
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
                                     />
@@ -350,6 +366,8 @@ export const VirtualizedTranscriptView: React.FC<VirtualizedTranscriptViewProps>
                                         timestamp={segment.timestamp}
                                         text={getDisplayText(segment)}
                                         confidence={segment.confidence}
+                                        translation={segment.translation}
+                                        showTranslation={showTranslation}
                                         isStreaming={isStreaming}
                                         showConfidence={showConfidence}
                                     />

@@ -67,6 +67,10 @@ interface ConfigContextType {
   translateToChinese: boolean;
   toggleTranslateToChinese: (checked: boolean) => void;
 
+  // Display-only: show/hide the Chinese translation line in the transcript
+  showTranslation: boolean;
+  toggleShowTranslation: (checked: boolean) => void;
+
   // Beta features
   betaFeatures: BetaFeatures;
   toggleBetaFeature: (featureKey: BetaFeatureKey, enabled: boolean) => void;
@@ -165,6 +169,15 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
       return saved === 'true';
     }
     return false;
+  });
+
+  // Display-only preference: whether to show the Chinese translation line (default ON)
+  const [showTranslation, setShowTranslation] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('showTranslation');
+      return saved !== null ? saved === 'true' : true;
+    }
+    return true;
   });
 
   // Summary configs
@@ -420,6 +433,14 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
       .catch(err => console.error('Failed to sync translate-to-Chinese to Rust:', err));
   }, []);
 
+  // Toggle display of the Chinese translation line (display-only, persisted)
+  const toggleShowTranslation = useCallback((checked: boolean) => {
+    setShowTranslation(checked);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('showTranslation', checked.toString());
+    }
+  }, []);
+
   // Toggle beta feature with localStorage persistence and analytics
   const toggleBetaFeature = useCallback((featureKey: BetaFeatureKey, enabled: boolean) => {
     setBetaFeatures(prev => {
@@ -530,6 +551,8 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     toggleConfidenceIndicator,
     translateToChinese,
     toggleTranslateToChinese,
+    showTranslation,
+    toggleShowTranslation,
     betaFeatures,
     toggleBetaFeature,
     models,
@@ -554,6 +577,8 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     toggleConfidenceIndicator,
     translateToChinese,
     toggleTranslateToChinese,
+    showTranslation,
+    toggleShowTranslation,
     betaFeatures,
     toggleBetaFeature,
     models,

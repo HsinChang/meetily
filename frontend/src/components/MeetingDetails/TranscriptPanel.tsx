@@ -4,6 +4,7 @@ import { Transcript, TranscriptSegmentData } from '@/types';
 import { TranscriptView } from '@/components/TranscriptView';
 import { VirtualizedTranscriptView } from '@/components/VirtualizedTranscriptView';
 import { TranscriptButtonGroup } from './TranscriptButtonGroup';
+import { useConfig } from '@/contexts/ConfigContext';
 import { useMemo } from 'react';
 
 interface TranscriptPanelProps {
@@ -49,6 +50,8 @@ export function TranscriptPanel({
   meetingFolderPath,
   onRefetchTranscripts,
 }: TranscriptPanelProps) {
+  const { showTranslation, toggleShowTranslation } = useConfig();
+
   // Convert transcripts to segments if pagination is not used but we want virtualization
   const convertedSegments = useMemo(() => {
     if (usePagination && segments) {
@@ -61,8 +64,14 @@ export function TranscriptPanel({
       endTime: t.audio_end_time,
       text: t.text,
       confidence: t.confidence,
+      translation: t.translation,
     }));
   }, [transcripts, usePagination, segments]);
+
+  const hasTranslations = useMemo(
+    () => convertedSegments.some((s) => !!s.translation),
+    [convertedSegments]
+  );
 
   return (
     <div className="hidden md:flex md:w-1/4 lg:w-1/3 min-w-0 border-r border-gray-200 bg-white flex-col relative shrink-0">
@@ -76,6 +85,35 @@ export function TranscriptPanel({
           meetingFolderPath={meetingFolderPath}
           onRefetchTranscripts={onRefetchTranscripts}
         />
+
+        {/* Show/hide Chinese translation (only when translations exist) */}
+        {hasTranslations && (
+          <div className="mt-2 flex items-center justify-center">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={showTranslation}
+              aria-label="Show Chinese translation"
+              onClick={() => toggleShowTranslation(!showTranslation)}
+              className="flex items-center gap-1.5 text-xs text-gray-600 hover:text-gray-800"
+              title="Show or hide the Chinese translation"
+            >
+              <span className={showTranslation ? 'text-blue-600 font-medium' : 'text-gray-500'}>译中</span>
+              <span
+                className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${
+                  showTranslation ? 'bg-blue-500' : 'bg-gray-300'
+                }`}
+              >
+                <span
+                  className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${
+                    showTranslation ? 'translate-x-3.5' : 'translate-x-0.5'
+                  }`}
+                />
+              </span>
+              <span>Show translation</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Transcript content - use virtualized view for better performance */}
@@ -88,6 +126,7 @@ export function TranscriptPanel({
           isStopping={false}
           enableStreaming={false}
           showConfidence={true}
+          showTranslation={showTranslation}
           disableAutoScroll={disableAutoScroll}
           hasMore={hasMore}
           isLoadingMore={isLoadingMore}
