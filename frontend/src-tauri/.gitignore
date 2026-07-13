@@ -5,3 +5,8 @@
 
 Cargo.lock
 Cargo.toml.orig
+
+# Built-in models fetched at build time (large binaries — never commit).
+# Populate with: pnpm fetch:models   (or node src-tauri/scripts/fetch-bundled-models.mjs)
+# See src-tauri/scripts/README-models.md
+/models/

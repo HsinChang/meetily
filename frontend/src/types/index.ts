@@ -16,6 +16,8 @@ export interface Transcript {
   audio_start_time?: number; // Seconds from recording start (e.g., 125.3)
   audio_end_time?: number;   // Seconds from recording start (e.g., 128.6)
   duration?: number;          // Segment duration in seconds (e.g., 3.3)
+  // Real-time Chinese translation (populated asynchronously via transcript-translation event)
+  translation?: string;
 }
 
 export interface TranscriptUpdate {
@@ -30,6 +32,13 @@ export interface TranscriptUpdate {
   audio_start_time: number; // Seconds from recording start
   audio_end_time: number;   // Seconds from recording start
   duration: number;          // Segment duration in seconds
+}
+
+// Payload for the `transcript-translation` event: a Chinese translation for the
+// finalized transcript segment identified by `sequence_id`.
+export interface TranscriptTranslation {
+  sequence_id: number;
+  text: string;
 }
 
 export interface Block {

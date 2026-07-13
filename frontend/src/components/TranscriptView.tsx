@@ -328,6 +328,12 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
                     </p>
                   </div>
                 )}
+                {/* Real-time Chinese translation (shown when available) */}
+                {transcript.translation && !originalWasEmpty && (
+                  <p className="text-sm text-blue-600/80 leading-relaxed mt-0.5 border-l-2 border-blue-200 pl-2">
+                    {transcript.translation}
+                  </p>
+                )}
               </div>
             </div>
           </motion.div>

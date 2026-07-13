@@ -10,7 +10,7 @@ export interface Language {
 }
 
 // ISO 639-1 language codes supported by Whisper
-const LANGUAGES: Language[] = [
+export const LANGUAGES: Language[] = [
   { code: 'auto', name: 'Auto Detect (Original Language)' },
   { code: 'auto-translate', name: 'Auto Detect (Translate to English)' },
   { code: 'en', name: 'English' },
@@ -128,7 +128,7 @@ export function LanguageSelection({
   provider = 'localWhisper'
 }: LanguageSelectionProps) {
   const [saving, setSaving] = useState(false);
-  const { setSelectedLanguage } = useConfig();
+  const { setSelectedLanguage, translateToChinese, toggleTranslateToChinese } = useConfig();
 
   // Parakeet only supports auto-detection (doesn't support manual language selection)
   const isParakeet = provider === 'parakeet';
@@ -229,6 +229,31 @@ export function LanguageSelection({
           )}
         </div>
       </div>
+
+      {/* Real-time Chinese translation toggle (hidden when source is already Chinese) */}
+      {selectedLanguage !== 'zh' && (
+        <div className="pt-2 border-t border-gray-100">
+          <label className="flex items-start justify-between gap-3 cursor-pointer">
+            <div>
+              <div className="flex items-center gap-2">
+                <Globe className="h-4 w-4 text-gray-600" />
+                <span className="text-sm font-medium text-gray-900">Translate to Chinese (实时中文翻译)</span>
+              </div>
+              <p className="mt-1 text-xs text-gray-600">
+                Show a live Simplified Chinese translation under each transcript line. Non-Chinese
+                speech only; runs locally via the built-in model.
+              </p>
+            </div>
+            <input
+              type="checkbox"
+              checked={translateToChinese}
+              onChange={(e) => toggleTranslateToChinese(e.target.checked)}
+              disabled={disabled}
+              className="mt-1 h-4 w-4 flex-shrink-0 rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
+            />
+          </label>
+        </div>
+      )}
     </div>
   );
 }

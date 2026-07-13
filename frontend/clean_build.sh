@@ -45,6 +45,21 @@ rm -rf out
 echo "Installing dependencies..."
 pnpm install
 
+# Fetch the models that ship built-in (whisper turbo, parakeet, qwen).
+# Existing files are skipped, so re-runs are cheap. See scripts/fetch-bundled-models.mjs.
+echo "Fetching bundled models..."
+node src-tauri/scripts/fetch-bundled-models.mjs
+
+# Build the llama-helper sidecar (local LLM inference for summaries + translation)
+# and place it in binaries/ with the target-triple suffix Tauri's externalBin expects.
+# (CI does this too; the local build needs it or bundling fails with
+#  "resource path 'binaries/llama-helper-...' doesn't exist".)
+echo "Building llama-helper sidecar..."
+TARGET_TRIPLE=$(rustc -vV | awk '/host:/ {print $2}')
+cargo build --release -p llama-helper --features metal
+mkdir -p src-tauri/binaries
+cp ../target/release/llama-helper "src-tauri/binaries/llama-helper-${TARGET_TRIPLE}"
+
 # Build the Next.js application first
 echo "Building Next.js application..."
 pnpm run build

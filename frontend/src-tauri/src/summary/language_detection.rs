@@ -24,6 +24,35 @@ pub struct SummaryLanguageDetection {
     pub reason: SummaryLanguageDetectionReason,
 }
 
+/// Fast, short-text-friendly check for whether a transcript segment is already
+/// (predominantly) written in Chinese. Used to skip real-time Chinese translation
+/// when the source is Chinese. Counts Han ideographs vs. other letters rather than
+/// relying on `whatlang`, which needs ~20+ chars to be reliable and struggles with
+/// the short segments produced during live transcription.
+pub(crate) fn is_probably_chinese(text: &str) -> bool {
+    let mut han = 0usize;
+    let mut other_letters = 0usize;
+    for ch in text.chars() {
+        if is_han(ch) {
+            han += 1;
+        } else if ch.is_alphabetic() {
+            other_letters += 1;
+        }
+    }
+    // Treat as Chinese if there are Han characters and they dominate the letters.
+    han > 0 && han >= other_letters
+}
+
+/// True for CJK Unified Ideographs (the common Han ranges).
+fn is_han(ch: char) -> bool {
+    matches!(ch as u32,
+        0x4E00..=0x9FFF   // CJK Unified Ideographs
+        | 0x3400..=0x4DBF // CJK Extension A
+        | 0xF900..=0xFAFF // CJK Compatibility Ideographs
+        | 0x20000..=0x2A6DF // CJK Extension B
+    )
+}
+
 pub(crate) fn detect_summary_language(transcript_texts: &[String]) -> SummaryLanguageDetection {
     let mut weights: HashMap<&'static str, usize> = HashMap::new();
     let mut saw_meaningful_text = false;

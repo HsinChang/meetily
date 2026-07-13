@@ -9,7 +9,7 @@ use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, Runtime};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 // Sequence counter for transcript updates
 static SEQUENCE_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -226,6 +226,15 @@ pub fn start_transcription_task<R: Runtime>(
                                                 worker_id, e
                                             );
                                         }
+
+                                        // Real-time translation to Chinese for finalized,
+                                        // non-Chinese segments (best-effort, off the hot path).
+                                        maybe_spawn_chinese_translation(
+                                            &app_clone,
+                                            update.sequence_id,
+                                            update.text.clone(),
+                                            update.is_partial,
+                                        );
                                         // PERFORMANCE: Removed verbose logging of every emission
                                     } else if !transcript.trim().is_empty() && should_log_this_chunk
                                     {
@@ -570,6 +579,82 @@ async fn transcribe_chunk_with_provider<R: Runtime>(
             }
         }
     }
+}
+
+/// If real-time Chinese translation is enabled and the finalized segment is not
+/// already Chinese, translate it via the built-in Qwen sidecar on a detached task
+/// and emit a `transcript-translation` event keyed by `sequence_id`. Best-effort:
+/// runs off the transcription loop and swallows errors so it never blocks or fails
+/// transcription.
+fn maybe_spawn_chinese_translation<R: Runtime>(
+    app: &AppHandle<R>,
+    sequence_id: u64,
+    text: String,
+    is_partial: bool,
+) {
+    // Only translate finalized, non-empty segments.
+    if is_partial || text.trim().is_empty() {
+        return;
+    }
+
+    // Feature toggle (synced from the frontend settings toggle).
+    if !crate::get_translate_to_chinese_internal() {
+        return;
+    }
+
+    // Skip when the source is already Chinese: explicit "zh" preference or detected.
+    if crate::get_language_preference_internal().as_deref() == Some("zh") {
+        return;
+    }
+    if crate::summary::language_detection::is_probably_chinese(&text) {
+        return;
+    }
+
+    let app = app.clone();
+    tokio::spawn(async move {
+        let app_data_dir = match app.path().app_data_dir() {
+            Ok(dir) => dir,
+            Err(e) => {
+                warn!("Translation skipped: could not resolve app_data_dir: {}", e);
+                return;
+            }
+        };
+
+        const TRANSLATION_MODEL: &str = "qwen3.5:4b";
+        const SYSTEM_PROMPT: &str = "You are a professional translator. Translate the user's text into Simplified Chinese. Output only the translation itself, with no explanations, notes, pinyin, or quotation marks.";
+
+        match crate::summary::summary_engine::generate_with_builtin(
+            &app_data_dir,
+            TRANSLATION_MODEL,
+            SYSTEM_PROMPT,
+            &text,
+            None,
+        )
+        .await
+        {
+            Ok(translated) => {
+                let translated = translated.trim().to_string();
+                if translated.is_empty() {
+                    return;
+                }
+                if let Err(e) = app.emit(
+                    "transcript-translation",
+                    serde_json::json!({
+                        "sequence_id": sequence_id,
+                        "text": translated,
+                    }),
+                ) {
+                    error!("Failed to emit transcript-translation event: {}", e);
+                }
+            }
+            Err(e) => {
+                warn!(
+                    "Chinese translation failed for segment {}: {}",
+                    sequence_id, e
+                );
+            }
+        }
+    });
 }
 
 /// Format current timestamp (wall-clock time)

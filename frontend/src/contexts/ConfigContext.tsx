@@ -63,6 +63,10 @@ interface ConfigContextType {
   showConfidenceIndicator: boolean;
   toggleConfidenceIndicator: (checked: boolean) => void;
 
+  // Real-time translation to Chinese (skips when source is already Chinese)
+  translateToChinese: boolean;
+  toggleTranslateToChinese: (checked: boolean) => void;
+
   // Beta features
   betaFeatures: BetaFeatures;
   toggleBetaFeature: (featureKey: BetaFeatureKey, enabled: boolean) => void;
@@ -154,6 +158,15 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     return true;
   });
 
+  // Real-time Chinese translation preference
+  const [translateToChinese, setTranslateToChinese] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('translateToChinese');
+      return saved === 'true';
+    }
+    return false;
+  });
+
   // Summary configs
   const [isAutoSummary, setisAutoSummary] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
@@ -223,6 +236,14 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
         });
     }
   }, []); 
+
+  // Sync translate-to-Chinese preference to Rust on mount (matches language sync)
+  useEffect(() => {
+    invoke('set_translate_to_chinese', { enabled: translateToChinese })
+      .catch(err => {
+        console.error('[ConfigContext] Failed to sync translate-to-Chinese to Rust on startup:', err);
+      });
+  }, []);
 
   // Load model configuration on mount
   useEffect(() => {
@@ -389,6 +410,16 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  // Toggle real-time Chinese translation, persist, and sync to Rust
+  const toggleTranslateToChinese = useCallback((checked: boolean) => {
+    setTranslateToChinese(checked);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('translateToChinese', checked.toString());
+    }
+    invoke('set_translate_to_chinese', { enabled: checked })
+      .catch(err => console.error('Failed to sync translate-to-Chinese to Rust:', err));
+  }, []);
+
   // Toggle beta feature with localStorage persistence and analytics
   const toggleBetaFeature = useCallback((featureKey: BetaFeatureKey, enabled: boolean) => {
     setBetaFeatures(prev => {
@@ -497,6 +528,8 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     setSelectedLanguage: handleSetSelectedLanguage,
     showConfidenceIndicator,
     toggleConfidenceIndicator,
+    translateToChinese,
+    toggleTranslateToChinese,
     betaFeatures,
     toggleBetaFeature,
     models,
@@ -519,6 +552,8 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     handleSetSelectedLanguage,
     showConfidenceIndicator,
     toggleConfidenceIndicator,
+    translateToChinese,
+    toggleTranslateToChinese,
     betaFeatures,
     toggleBetaFeature,
     models,

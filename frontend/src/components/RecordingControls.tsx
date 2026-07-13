@@ -3,13 +3,15 @@
 import { invoke } from '@tauri-apps/api/core';
 import { appDataDir } from '@tauri-apps/api/path';
 import { useCallback, useEffect, useState, useRef } from 'react';
-import { Play, Pause, Square, Mic, AlertCircle, X } from 'lucide-react';
+import { Play, Pause, Square, Mic, AlertCircle, X, Globe } from 'lucide-react';
 import { ProcessRequest, SummaryResponse } from '@/types/summary';
 import { listen } from '@tauri-apps/api/event';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import Analytics from '@/lib/analytics';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
+import { useConfig } from '@/contexts/ConfigContext';
+import { LANGUAGES } from '@/components/LanguageSelection';
 
 interface RecordingControlsProps {
   isRecording: boolean;
@@ -44,6 +46,15 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
   // Use global recording state context for pause state (syncs with tray operations)
   const recordingState = useRecordingState();
   const isPaused = recordingState.isPaused;
+
+  // Language + real-time Chinese translation controls (must be selectable before
+  // recording; the translation toggle also works live during recording).
+  const {
+    selectedLanguage,
+    setSelectedLanguage,
+    translateToChinese,
+    toggleTranslateToChinese,
+  } = useConfig();
 
   const [showPlayback, setShowPlayback] = useState(false);
   const [recordingPath, setRecordingPath] = useState<string | null>(null);
@@ -341,7 +352,69 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
 
   return (
     <TooltipProvider>
-      <div className="flex flex-col space-y-2">
+      <div className="flex flex-col items-center space-y-2">
+        {/* Language + real-time Chinese translation controls.
+            Language is selectable only before recording (Whisper's language is
+            fixed at start); the translation toggle works before AND during. */}
+        {!showPlayback && (
+          <div className="flex items-center gap-2 bg-white rounded-full shadow-lg px-3 py-1.5 text-xs">
+            {!isRecording ? (
+              <>
+                <Globe size={14} className="text-gray-500 flex-shrink-0" />
+                <select
+                  value={selectedLanguage}
+                  onChange={(e) => setSelectedLanguage(e.target.value)}
+                  disabled={isStarting || isValidatingModel}
+                  className="bg-transparent text-gray-700 focus:outline-none max-w-[150px] cursor-pointer disabled:opacity-50"
+                  title="Transcription language"
+                >
+                  {LANGUAGES.map((language) => (
+                    <option key={language.code} value={language.code}>
+                      {language.name}
+                    </option>
+                  ))}
+                </select>
+              </>
+            ) : (
+              <span className="text-gray-500 flex items-center gap-1">
+                <Globe size={14} className="flex-shrink-0" />
+                {LANGUAGES.find((l) => l.code === selectedLanguage)?.name ?? selectedLanguage}
+              </span>
+            )}
+
+            {/* Chinese translation toggle (hidden when source is already Chinese) */}
+            {selectedLanguage !== 'zh' && (
+              <>
+                <div className="w-px h-4 bg-gray-200" />
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={translateToChinese}
+                  aria-label="Translate to Chinese"
+                  onClick={() => toggleTranslateToChinese(!translateToChinese)}
+                  className="flex items-center gap-1.5 cursor-pointer"
+                  title="Real-time translation to Chinese"
+                >
+                  <span className={translateToChinese ? 'text-blue-600 font-medium' : 'text-gray-500'}>
+                    译中
+                  </span>
+                  <span
+                    className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${
+                      translateToChinese ? 'bg-blue-500' : 'bg-gray-300'
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${
+                        translateToChinese ? 'translate-x-3.5' : 'translate-x-0.5'
+                      }`}
+                    />
+                  </span>
+                </button>
+              </>
+            )}
+          </div>
+        )}
+
         <div className="flex items-center space-x-2 bg-white rounded-full shadow-lg px-4 py-2">
           {isProcessing && !isParentProcessing ? (
             <div className="flex items-center space-x-2">

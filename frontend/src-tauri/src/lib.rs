@@ -42,6 +42,7 @@ pub mod config;
 pub mod console_utils;
 pub mod database;
 pub mod notifications;
+pub mod models_seed;
 pub mod ollama;
 pub mod onboarding;
 pub mod openai;
@@ -67,6 +68,11 @@ static RECORDING_FLAG: AtomicBool = AtomicBool::new(false);
 // Global language preference storage (default to "auto-translate" for automatic translation to English)
 static LANGUAGE_PREFERENCE: std::sync::LazyLock<StdMutex<String>> =
     std::sync::LazyLock::new(|| StdMutex::new("auto-translate".to_string()));
+
+// When true, finalized non-Chinese transcript segments are translated to Simplified
+// Chinese in real time via the built-in Qwen sidecar (see audio/transcription/worker.rs).
+static TRANSLATE_TO_CHINESE: std::sync::LazyLock<AtomicBool> =
+    std::sync::LazyLock::new(|| AtomicBool::new(false));
 
 #[derive(Debug, Deserialize)]
 struct RecordingArgs {
@@ -387,6 +393,18 @@ pub fn get_language_preference_internal() -> Option<String> {
     LANGUAGE_PREFERENCE.lock().ok().map(|lang| lang.clone())
 }
 
+#[tauri::command]
+async fn set_translate_to_chinese(enabled: bool) -> Result<(), String> {
+    log_info!("Setting translate-to-Chinese to: {}", enabled);
+    TRANSLATE_TO_CHINESE.store(enabled, std::sync::atomic::Ordering::SeqCst);
+    Ok(())
+}
+
+// Internal helper to read the translate-to-Chinese preference (for use within Rust code)
+pub fn get_translate_to_chinese_internal() -> bool {
+    TRANSLATE_TO_CHINESE.load(std::sync::atomic::Ordering::SeqCst)
+}
+
 pub fn run() {
     log::set_max_level(log::LevelFilter::Info);
 
@@ -419,6 +437,11 @@ pub fn run() {
         .manage(summary::summary_engine::ModelManagerState(Arc::new(tokio::sync::Mutex::new(None))))
         .setup(|_app| {
             log::info!("Application setup complete");
+
+            // Seed built-in models (whisper turbo, parakeet, qwen) from the bundled
+            // resources into the app-data models dir on first launch, before the
+            // engines discover models. First-run only; guarded by a marker file.
+            models_seed::seed_bundled_models(&_app.handle());
 
             // Initialize system tray
             if let Err(e) = tray::create_tray(_app.handle()) {
@@ -692,6 +715,7 @@ pub fn run() {
             audio::recording_preferences::get_audio_backend_info,
             // Language preference commands
             set_language_preference,
+            set_translate_to_chinese,
             // Notification system commands
             notifications::commands::get_notification_settings,
             notifications::commands::set_notification_settings,

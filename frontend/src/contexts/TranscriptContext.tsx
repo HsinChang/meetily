@@ -358,6 +358,37 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
     };
   }, [currentMeetingId]); // Add currentMeetingId dependency
 
+  // Listen for real-time Chinese translations and merge them into the matching
+  // transcript segment (by sequence_id). Translations arrive asynchronously after
+  // the transcript is already rendered, so we patch the existing item.
+  useEffect(() => {
+    let unlistenFn: (() => void) | undefined;
+
+    const setupTranslationListener = async () => {
+      try {
+        unlistenFn = await transcriptService.onTranscriptTranslation((translation) => {
+          setTranscripts(prev =>
+            prev.map(t =>
+              t.sequence_id === translation.sequence_id
+                ? { ...t, translation: translation.text }
+                : t
+            )
+          );
+        });
+      } catch (error) {
+        console.error('❌ Failed to setup transcript translation listener:', error);
+      }
+    };
+
+    setupTranslationListener();
+
+    return () => {
+      if (unlistenFn) {
+        unlistenFn();
+      }
+    };
+  }, []);
+
   // Sync transcript history and meeting name from backend on reload
   // This fixes the issue where reloading during active recording causes state desync
   useEffect(() => {
