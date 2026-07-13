@@ -8,6 +8,7 @@ import { ModelConfig } from '@/components/ModelSettingsModal';
 import { SummaryGeneratorButtonGroup } from './SummaryGeneratorButtonGroup';
 import { SummaryUpdaterButtonGroup } from './SummaryUpdaterButtonGroup';
 import Analytics from '@/lib/analytics';
+import { exportGongwenDocx } from '@/lib/gongwenDocx';
 import { useEffect, useRef, useState, RefObject } from 'react';
 import { toast } from 'sonner';
 import { Languages, ChevronDown } from 'lucide-react';
@@ -300,6 +301,19 @@ export function SummaryPanel({
                   console.log('Find in summary clicked');
                 }}
                 onOpenFolder={onOpenFolder}
+                onExportDocx={
+                  aiSummary
+                    ? () => {
+                        exportGongwenDocx(aiSummary, meetingTitle || meeting.title)
+                          .then(() => toast.success('已导出党政机关公文格式 .docx'))
+                          .catch((e) =>
+                            toast.error(
+                              '导出失败: ' + (e instanceof Error ? e.message : String(e))
+                            )
+                          );
+                      }
+                    : undefined
+                }
                 hasSummary={!!aiSummary}
               />
             </div>

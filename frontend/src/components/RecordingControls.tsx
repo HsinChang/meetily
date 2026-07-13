@@ -2,8 +2,8 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { appDataDir } from '@tauri-apps/api/path';
-import { useCallback, useEffect, useState, useRef } from 'react';
-import { Play, Pause, Square, Mic, AlertCircle, X, Globe } from 'lucide-react';
+import { useCallback, useEffect, useState, useRef, type ReactNode } from 'react';
+import { Play, Pause, Square, Mic, AlertCircle, X, Globe, Volume2 } from 'lucide-react';
 import { ProcessRequest, SummaryResponse } from '@/types/summary';
 import { listen } from '@tauri-apps/api/event';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -54,6 +54,8 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
     setSelectedLanguage,
     translateToChinese,
     toggleTranslateToChinese,
+    recordingMode,
+    setRecordingMode,
   } = useConfig();
 
   const [showPlayback, setShowPlayback] = useState(false);
@@ -353,6 +355,34 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
   return (
     <TooltipProvider>
       <div className="flex flex-col items-center space-y-2">
+        {/* Audio source selector: choose which sources to capture. Only before
+            recording (sources are fixed once a recording starts). */}
+        {!isRecording && !showPlayback && (
+          <div className="flex items-center gap-1 bg-white rounded-full shadow-lg px-1.5 py-1 text-xs">
+            {([
+              { key: 'both', label: 'Mic + System', icon: <><Mic size={12} /><Volume2 size={12} /></> },
+              { key: 'system', label: 'System only', icon: <Volume2 size={13} /> },
+              { key: 'microphone', label: 'Mic only', icon: <Mic size={13} /> },
+            ] as { key: 'both' | 'system' | 'microphone'; label: string; icon: ReactNode }[]).map((opt) => (
+              <button
+                key={opt.key}
+                type="button"
+                onClick={() => setRecordingMode(opt.key)}
+                aria-pressed={recordingMode === opt.key}
+                className={`px-2 py-0.5 rounded-full flex items-center gap-1 transition-colors ${
+                  recordingMode === opt.key
+                    ? 'bg-blue-500 text-white'
+                    : 'text-gray-600 hover:bg-gray-100'
+                }`}
+                title={`Record ${opt.label}`}
+              >
+                {opt.icon}
+                <span>{opt.label}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* Language + real-time Chinese translation controls.
             Language is selectable only before recording (Whisper's language is
             fixed at start); the translation toggle works before AND during. */}

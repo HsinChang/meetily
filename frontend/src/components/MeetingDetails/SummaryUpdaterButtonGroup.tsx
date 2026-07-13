@@ -2,7 +2,7 @@
 
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
-import { Copy, Save, Loader2, Search, FolderOpen } from 'lucide-react';
+import { Copy, Save, Loader2, Search, FolderOpen, FileText } from 'lucide-react';
 import Analytics from '@/lib/analytics';
 
 interface SummaryUpdaterButtonGroupProps {
@@ -12,6 +12,7 @@ interface SummaryUpdaterButtonGroupProps {
   onCopy: () => Promise<void>;
   onFind?: () => void;
   onOpenFolder: () => Promise<void>;
+  onExportDocx?: () => void;
   hasSummary: boolean;
 }
 
@@ -22,6 +23,7 @@ export function SummaryUpdaterButtonGroup({
   onCopy,
   onFind,
   onOpenFolder,
+  onExportDocx,
   hasSummary
 }: SummaryUpdaterButtonGroupProps) {
   return (
@@ -66,6 +68,24 @@ export function SummaryUpdaterButtonGroup({
         <Copy />
         <span className="hidden lg:inline">Copy</span>
       </Button>
+
+      {/* Export as 公文格式 .docx */}
+      {onExportDocx && (
+        <Button
+          variant="outline"
+          size="sm"
+          title="导出党政机关公文格式 (.docx)"
+          onClick={() => {
+            Analytics.trackButtonClick('export_gongwen_docx', 'meeting_details');
+            onExportDocx();
+          }}
+          disabled={!hasSummary}
+          className="cursor-pointer"
+        >
+          <FileText />
+          <span className="hidden lg:inline">公文 .docx</span>
+        </Button>
+      )}
 
       {/* Find button */}
       {/* {onFind && (

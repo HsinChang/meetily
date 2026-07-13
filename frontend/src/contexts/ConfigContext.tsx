@@ -71,6 +71,10 @@ interface ConfigContextType {
   showTranslation: boolean;
   toggleShowTranslation: (checked: boolean) => void;
 
+  // Which audio sources to capture: both, system audio only, or microphone only
+  recordingMode: 'both' | 'system' | 'microphone';
+  setRecordingMode: (mode: 'both' | 'system' | 'microphone') => void;
+
   // Beta features
   betaFeatures: BetaFeatures;
   toggleBetaFeature: (featureKey: BetaFeatureKey, enabled: boolean) => void;
@@ -179,6 +183,24 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     }
     return true;
   });
+
+  // Audio source capture mode (default: both mic + system)
+  const [recordingMode, setRecordingModeState] = useState<'both' | 'system' | 'microphone'>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('recordingMode');
+      if (saved === 'system' || saved === 'microphone' || saved === 'both') {
+        return saved;
+      }
+    }
+    return 'both';
+  });
+
+  const setRecordingMode = useCallback((mode: 'both' | 'system' | 'microphone') => {
+    setRecordingModeState(mode);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('recordingMode', mode);
+    }
+  }, []);
 
   // Summary configs
   const [isAutoSummary, setisAutoSummary] = useState<boolean>(() => {
@@ -553,6 +575,8 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     toggleTranslateToChinese,
     showTranslation,
     toggleShowTranslation,
+    recordingMode,
+    setRecordingMode,
     betaFeatures,
     toggleBetaFeature,
     models,
@@ -579,6 +603,8 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     toggleTranslateToChinese,
     showTranslation,
     toggleShowTranslation,
+    recordingMode,
+    setRecordingMode,
     betaFeatures,
     toggleBetaFeature,
     models,

@@ -34,7 +34,15 @@ export function useRecordingStart(
 
   const { clearTranscripts, setMeetingTitle } = useTranscripts();
   const { setIsMeetingActive } = useSidebar();
-  const { selectedDevices } = useConfig();
+  const { selectedDevices, recordingMode } = useConfig();
+
+  // Resolve the mic/system device args for the current source mode.
+  // Forcing a source to null makes the backend skip it entirely (removed from
+  // both recording and transcription).
+  const resolveDeviceArgs = () => ({
+    micArg: recordingMode === 'system' ? null : (selectedDevices?.micDevice || null),
+    systemArg: recordingMode === 'microphone' ? null : (selectedDevices?.systemDevice || null),
+  });
   const { setStatus } = useRecordingState();
 
   // Generate meeting title with timestamp
@@ -116,9 +124,10 @@ export function useRecordingStart(
 
       // Start the actual backend recording
       console.log('Starting backend recording with meeting:', randomTitle);
+      const { micArg, systemArg } = resolveDeviceArgs();
       await recordingService.startRecordingWithDevices(
-        selectedDevices?.micDevice || null,
-        selectedDevices?.systemDevice || null,
+        micArg,
+        systemArg,
         randomTitle
       );
       console.log('Backend recording started successfully');
@@ -141,7 +150,7 @@ export function useRecordingStart(
       // Re-throw so RecordingControls can handle device-specific errors
       throw error;
     }
-  }, [generateMeetingTitle, setMeetingTitle, setIsRecording, clearTranscripts, setIsMeetingActive, checkParakeetReady, checkIfModelDownloading, selectedDevices, showModal, setStatus]);
+  }, [generateMeetingTitle, setMeetingTitle, setIsRecording, clearTranscripts, setIsMeetingActive, checkParakeetReady, checkIfModelDownloading, selectedDevices, recordingMode, showModal, setStatus]);
 
   // Check for autoStartRecording flag and start recording automatically
   useEffect(() => {
@@ -185,9 +194,10 @@ export function useRecordingStart(
             setStatus(RecordingStatus.STARTING, 'Initializing recording...');
 
             console.log('Auto-starting backend recording with meeting:', generatedMeetingTitle);
+            const { micArg, systemArg } = resolveDeviceArgs();
             const result = await recordingService.startRecordingWithDevices(
-              selectedDevices?.micDevice || null,
-              selectedDevices?.systemDevice || null,
+              micArg,
+              systemArg,
               generatedMeetingTitle
             );
             console.log('Auto-start backend recording result:', result);
@@ -219,6 +229,7 @@ export function useRecordingStart(
     isRecording,
     isAutoStarting,
     selectedDevices,
+    recordingMode,
     generateMeetingTitle,
     setMeetingTitle,
     setIsRecording,
@@ -272,9 +283,10 @@ export function useRecordingStart(
         setStatus(RecordingStatus.STARTING, 'Initializing recording...');
 
         console.log('Starting backend recording with meeting:', generatedMeetingTitle);
+        const { micArg, systemArg } = resolveDeviceArgs();
         const result = await recordingService.startRecordingWithDevices(
-          selectedDevices?.micDevice || null,
-          selectedDevices?.systemDevice || null,
+          micArg,
+          systemArg,
           generatedMeetingTitle
         );
         console.log('Backend recording result:', result);
@@ -308,6 +320,7 @@ export function useRecordingStart(
     isRecording,
     isAutoStarting,
     selectedDevices,
+    recordingMode,
     generateMeetingTitle,
     setMeetingTitle,
     setIsRecording,
