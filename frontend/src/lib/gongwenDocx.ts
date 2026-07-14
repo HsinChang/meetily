@@ -89,59 +89,173 @@ function headingParagraph(text: string, font: string): Paragraph {
   });
 }
 
-/**
- * Build the ordered list of docx paragraphs from a Summary.
- * The Summary is a map of sectionKey -> { title, blocks[] }; a special "title"
- * key (if present) is treated as the document title, matching convertToMarkdown.
- */
-function buildBody(summary: Summary): Paragraph[] {
-  const paragraphs: Paragraph[] = [];
-  let sectionIndex = 0;
+// Unified intermediate representation for any summary format.
+type OutlineKind = 'h1' | 'h2' | 'h3' | 'body';
+interface OutlineItem {
+  kind: OutlineKind;
+  text: string;
+}
 
-  for (const [key, section] of Object.entries(summary)) {
-    if (!section) continue;
-    if (key === 'title') continue; // document title handled separately
+/** Strip common inline markdown so we render plain text runs. */
+function stripInlineMarkdown(s: string): string {
+  return (s ?? '')
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/__(.*?)__/g, '$1')
+    .replace(/\*(.*?)\*/g, '$1')
+    .replace(/`([^`]*)`/g, '$1')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/^>\s*/, '')
+    .trim();
+}
+
+/** Remove a leading enumerator (一、/（一）/1./- ) so 公文 numbering isn't doubled. */
+function stripLeadingEnumerator(text: string): string {
+  return text
+    .replace(
+      /^\s*(?:[（(]?\s*[一二三四五六七八九十]{1,3}\s*[)）]?\s*[、.．]?|\d{1,3}\s*[、.．)]|[-*+•])\s+/,
+      ''
+    )
+    .trim();
+}
+
+/** Extract plain text from a BlockNote block's inline content array. */
+function blockNoteText(block: any): string {
+  const content = block?.content;
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content.map((c: any) => (typeof c === 'string' ? c : c?.text ?? '')).join('');
+}
+
+/** Markdown -> outline. Uses relative heading depth so the shallowest heading is 一级. */
+function outlineFromMarkdown(md: string): OutlineItem[] {
+  const lines = md.split(/\r?\n/);
+  const headingLevels: number[] = [];
+  for (const l of lines) {
+    const m = l.match(/^(#{1,6})\s+\S/);
+    if (m) headingLevels.push(m[1].length);
+  }
+  const minLevel = headingLevels.length ? Math.min(...headingLevels) : 1;
+
+  const items: OutlineItem[] = [];
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line || /^([-=*_])\1{2,}$/.test(line)) continue; // skip blank / hr
+
+    const h = line.match(/^(#{1,6})\s+(.*)$/);
+    if (h) {
+      const rel = h[1].length - minLevel;
+      const kind: OutlineKind = rel <= 0 ? 'h1' : rel === 1 ? 'h2' : 'h3';
+      const text = stripInlineMarkdown(h[2]);
+      if (text) items.push({ kind, text });
+      continue;
+    }
+
+    const body = stripInlineMarkdown(line.replace(/^(?:[-*+•]|\d+[.)])\s+/, ''));
+    if (body) items.push({ kind: 'body', text: body });
+  }
+  return items;
+}
+
+/** BlockNote JSON blocks -> outline. */
+function outlineFromBlockNote(blocks: any[]): OutlineItem[] {
+  const items: OutlineItem[] = [];
+  const walk = (arr: any[]) => {
+    for (const b of arr ?? []) {
+      const text = stripInlineMarkdown(blockNoteText(b));
+      if (b?.type === 'heading') {
+        const level = Number(b?.props?.level) || 1;
+        const kind: OutlineKind = level <= 1 ? 'h1' : level === 2 ? 'h2' : 'h3';
+        if (text) items.push({ kind, text });
+      } else if (text) {
+        items.push({ kind: 'body', text });
+      }
+      if (Array.isArray(b?.children) && b.children.length) walk(b.children);
+    }
+  };
+  walk(blocks);
+  return items;
+}
+
+/** Legacy section/blocks Summary -> outline. */
+function outlineFromSections(summary: Record<string, any>): OutlineItem[] {
+  const items: OutlineItem[] = [];
+  for (const [key, section] of Object.entries(summary ?? {})) {
+    if (!section || key === 'title') continue;
     const blocks = section.blocks ?? [];
     if (blocks.length === 0) continue;
 
-    sectionIndex += 1;
-    let h1Index = 0; // 二级 （一）
-    let h2Index = 0; // 三级 1.
-
-    // 一级标题: "一、<section title>" 黑体
-    const sectionTitle = cleanText(section.title || key).replace(/[:：]$/, '');
-    paragraphs.push(
-      headingParagraph(`${toChineseNumber(sectionIndex)}、${sectionTitle}`, FONT_HEI)
-    );
-
+    items.push({ kind: 'h1', text: cleanText(section.title || key).replace(/[:：]$/, '') });
     for (const block of blocks) {
       const content = cleanText(block.content);
       if (!content) continue;
+      if (block.type === 'heading1') items.push({ kind: 'h2', text: content });
+      else if (block.type === 'heading2') items.push({ kind: 'h3', text: content });
+      else items.push({ kind: 'body', text: content });
+    }
+  }
+  return items;
+}
 
-      switch (block.type) {
-        case 'heading1': {
-          h1Index += 1;
-          h2Index = 0; // reset 三级 numbering under a new 二级 heading
-          paragraphs.push(
-            headingParagraph(`${toParenChineseNumber(h1Index)}${content}`, FONT_KAI)
-          );
-          break;
-        }
-        case 'heading2': {
-          h2Index += 1;
-          // 三级标题用仿宋（与正文同字体），形如 "1."
-          paragraphs.push(headingParagraph(`${h2Index}.${content}`, FONT_FANGSONG));
-          break;
-        }
-        case 'bullet':
-        case 'text':
-        default:
-          paragraphs.push(bodyParagraph(content));
-          break;
-      }
+/** Detect the summary format and produce a unified outline. */
+function summaryToOutline(summary: any): OutlineItem[] {
+  if (summary && typeof summary.markdown === 'string') {
+    return outlineFromMarkdown(summary.markdown);
+  }
+  if (summary && Array.isArray(summary.summary_json)) {
+    return outlineFromBlockNote(summary.summary_json);
+  }
+  return outlineFromSections(summary);
+}
+
+/**
+ * Render the outline into 公文-formatted paragraphs, applying 层次序数 numbering
+ * (一、/（一）/1.) and the matching fonts. Headings equal to the document title
+ * are skipped to avoid duplicating the centered 标题.
+ */
+function buildBody(summary: any, docTitle: string): Paragraph[] {
+  const items = summaryToOutline(summary);
+  const paragraphs: Paragraph[] = [];
+  let h1 = 0;
+  let h2 = 0;
+  let h3 = 0;
+  const normalizedTitle = cleanText(docTitle);
+
+  for (const item of items) {
+    const text = cleanText(item.text);
+    if (!text) continue;
+
+    if (item.kind !== 'body' && text === normalizedTitle) continue; // avoid title dup
+
+    switch (item.kind) {
+      case 'h1':
+        h1 += 1;
+        h2 = 0;
+        h3 = 0;
+        paragraphs.push(
+          headingParagraph(`${toChineseNumber(h1)}、${stripLeadingEnumerator(text)}`, FONT_HEI)
+        );
+        break;
+      case 'h2':
+        h2 += 1;
+        h3 = 0;
+        paragraphs.push(
+          headingParagraph(`${toParenChineseNumber(h2)}${stripLeadingEnumerator(text)}`, FONT_KAI)
+        );
+        break;
+      case 'h3':
+        h3 += 1;
+        paragraphs.push(
+          headingParagraph(`${h3}.${stripLeadingEnumerator(text)}`, FONT_FANGSONG)
+        );
+        break;
+      default:
+        paragraphs.push(bodyParagraph(text));
+        break;
     }
   }
 
+  // Fallback: if nothing structured was produced (e.g. empty summary), avoid a
+  // title-only document by at least emitting any raw markdown text.
   return paragraphs;
 }
 
@@ -175,7 +289,7 @@ export async function exportGongwenDocx(summary: Summary, title: string): Promis
     children: [new TextRun({ text: docTitle, font: FONT_TITLE, size: SIZE_2HAO })],
   });
 
-  const bodyParagraphs = buildBody(summary);
+  const bodyParagraphs = buildBody(summary, docTitle);
 
   const doc = new Document({
     creator: 'Xin-Meetily',

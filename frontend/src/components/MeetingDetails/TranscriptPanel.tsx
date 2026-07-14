@@ -5,7 +5,11 @@ import { TranscriptView } from '@/components/TranscriptView';
 import { VirtualizedTranscriptView } from '@/components/VirtualizedTranscriptView';
 import { TranscriptButtonGroup } from './TranscriptButtonGroup';
 import { useConfig } from '@/contexts/ConfigContext';
-import { useMemo } from 'react';
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
+import { Download } from 'lucide-react';
+import { exportTranscriptDocx, exportTranscriptTxt, type TranscriptExportFormat } from '@/lib/transcriptExport';
+import { toast } from 'sonner';
+import { useMemo, useState } from 'react';
 
 interface TranscriptPanelProps {
   transcripts: Transcript[];
@@ -29,6 +33,9 @@ interface TranscriptPanelProps {
   meetingId?: string;
   meetingFolderPath?: string | null;
   onRefetchTranscripts?: () => Promise<void>;
+
+  // Meeting title (used for export filenames)
+  meetingTitle?: string;
 }
 
 export function TranscriptPanel({
@@ -49,8 +56,27 @@ export function TranscriptPanel({
   meetingId,
   meetingFolderPath,
   onRefetchTranscripts,
+  meetingTitle,
 }: TranscriptPanelProps) {
   const { showTranslation, toggleShowTranslation } = useConfig();
+  const [includeTranslation, setIncludeTranslation] = useState(true);
+
+  const handleExportTranscript = (format: TranscriptExportFormat) => {
+    const title = meetingTitle?.trim() || 'transcript';
+    const withTranslation = hasTranslations && includeTranslation;
+    try {
+      if (format === 'docx') {
+        exportTranscriptDocx(convertedSegments, title, withTranslation)
+          .then(() => toast.success('Transcript exported (.docx)'))
+          .catch((e) => toast.error('Export failed: ' + (e instanceof Error ? e.message : String(e))));
+      } else {
+        exportTranscriptTxt(convertedSegments, title, withTranslation);
+        toast.success('Transcript exported (.txt)');
+      }
+    } catch (e) {
+      toast.error('Export failed: ' + (e instanceof Error ? e.message : String(e)));
+    }
+  };
 
   // Convert transcripts to segments if pagination is not used but we want virtualization
   const convertedSegments = useMemo(() => {
@@ -112,6 +138,54 @@ export function TranscriptPanel({
               </span>
               <span>Show translation</span>
             </button>
+          </div>
+        )}
+
+        {/* Export transcript to .docx / .txt (optionally with translation) */}
+        {convertedSegments.length > 0 && (
+          <div className="mt-2 flex items-center justify-center">
+            <Popover>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  className="flex items-center gap-1.5 text-xs text-gray-600 hover:text-gray-800 px-2 py-1 rounded-md hover:bg-gray-100"
+                  title="Export transcript"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Export transcript</span>
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="center" className="w-60 p-3 text-sm">
+                <div className="font-medium text-gray-900 mb-2">Export transcript</div>
+                {hasTranslations && (
+                  <label className="flex items-center gap-2 mb-3 cursor-pointer text-gray-700">
+                    <input
+                      type="checkbox"
+                      checked={includeTranslation}
+                      onChange={(e) => setIncludeTranslation(e.target.checked)}
+                      className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span>Include Chinese translation (译中)</span>
+                  </label>
+                )}
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleExportTranscript('docx')}
+                    className="flex-1 px-3 py-1.5 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                  >
+                    .docx
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleExportTranscript('txt')}
+                    className="flex-1 px-3 py-1.5 text-sm bg-gray-100 text-gray-800 rounded-md hover:bg-gray-200"
+                  >
+                    .txt
+                  </button>
+                </div>
+              </PopoverContent>
+            </Popover>
           </div>
         )}
       </div>

@@ -191,6 +191,7 @@ export default function PageContent({
           meetingId={meeting.id}
           meetingFolderPath={meeting.folder_path}
           onRefetchTranscripts={onRefetchTranscripts}
+          meetingTitle={meetingData.meetingTitle}
         />
         <SummaryPanel
           meeting={meeting}
