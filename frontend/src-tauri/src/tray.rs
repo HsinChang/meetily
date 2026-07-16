@@ -24,7 +24,12 @@ pub fn create_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     TrayIconBuilder::with_id("main-tray")
         .menu(&menu)
         .tooltip("Meetily")
-        .icon(app.default_window_icon().unwrap().clone())
+        // Dedicated menubar/tray icon (not the main app icon). Embedded at compile
+        // time from src-tauri/icons/menu-icon.png (must be RGBA).
+        .icon(tauri::include_image!("icons/menu-icon.png"))
+        // Transparent background: alpha carries the artwork, so let macOS tint it
+        // as a template (black on a light menubar, white on a dark one).
+        .icon_as_template(true)
         .on_menu_event(|app, event| handle_menu_event(app, event.id.as_ref()))
         .build(app)?;
 
