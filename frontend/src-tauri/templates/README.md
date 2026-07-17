@@ -4,25 +4,42 @@ This directory contains template definitions for meeting summary generation.
 
 ## Available Templates
 
-### 1. `daily_standup.json`
-Time-boxed daily updates template designed for engineering/product teams.
+These templates target governmental / administrative use and are written to produce
+formal Chinese public-document (公文) style output. Section titles become the headings
+used by the 公文格式 .docx export.
+
+### 1. `gov_brief.json` — 会议纪要·简要版
+Short minutes for routine administrative meetings; fits within 1–2 pages.
 
 **Sections:**
-- Date
-- Attendees
-- Yesterday (completed work)
-- Today (planned work)
-- Blockers
-- Notes
+- 会议背景 (background, ≤150 chars)
+- 会议要点 (5–8 key points / decisions)
 
-### 2. `standard_meeting.json`
-General-purpose meeting notes template focusing on key outcomes and actions.
+### 2. `gov_detailed.json` — 会议纪要·详细版
+Full minutes for formal meetings that must be filed for the record.
 
 **Sections:**
-- Summary
-- Key Decisions
-- Action Items
-- Discussion Highlights
+- 会议概况 (time, place, format, chair)
+- 参会人员 (attendees table)
+- 会议背景 (background)
+- 会议经过 (flow of the meeting — the focus of this template)
+- 议定事项 (decisions with owners and deadlines)
+
+### 3. `gov_report.json` — 会议报告·呈报版
+Detailed report with analysis and recommendations, for submission to supervisors.
+
+**Sections:**
+- 会议概况
+- 参会人员
+- 背景与形势
+- 主要内容与讨论
+- 议定事项与责任分工
+- 分析研判 (analysis / insight)
+- 问题与风险
+- 下一步工作建议
+
+> Instructions in these templates explicitly forbid inventing names, owners or deadlines
+> that are not present in the transcript — unknowns are recorded as “待明确” / “未提及”.
 
 ## Template Structure
 
@@ -75,7 +92,7 @@ Templates are loaded using the `templates` module:
 use crate::summary::templates;
 
 // Get a specific template
-let template = templates::get_template("daily_standup")?;
+let template = templates::get_template("gov_brief")?;
 
 // List available templates
 let available = templates::list_templates();

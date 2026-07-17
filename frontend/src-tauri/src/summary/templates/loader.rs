@@ -223,11 +223,11 @@ mod tests {
 
     #[test]
     fn test_get_builtin_template() {
-        let template = get_template("daily_standup");
+        let template = get_template("gov_brief");
         assert!(template.is_ok());
 
         let template = template.unwrap();
-        assert_eq!(template.name, "Daily Standup");
+        assert!(template.name.contains("简要版"));
         assert!(!template.sections.is_empty());
     }
 

@@ -9,7 +9,7 @@ export function useTemplates() {
     name: string;
     description: string;
   }>>([]);
-  const [selectedTemplate, setSelectedTemplate] = useState<string>('standard_meeting');
+  const [selectedTemplate, setSelectedTemplate] = useState<string>('gov_brief');
 
   // Fetch available templates on mount
   useEffect(() => {

@@ -72,10 +72,12 @@ export function ImportAudioDialog({
 }: ImportAudioDialogProps) {
   const router = useRouter();
   const { refetchMeetings } = useSidebar();
-  const { selectedLanguage, transcriptModelConfig } = useConfig();
+  const { selectedLanguage, transcriptModelConfig, translateToChinese: globalTranslateToChinese } = useConfig();
 
   const [title, setTitle] = useState('');
   const [selectedLang, setSelectedLang] = useState(selectedLanguage || 'auto');
+  // Per-import choice; defaults to the global 译中 preference.
+  const [translateToChinese, setTranslateToChinese] = useState(globalTranslateToChinese);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [titleModifiedByUser, setTitleModifiedByUser] = useState(false);
 
@@ -138,6 +140,7 @@ export function ImportAudioDialog({
       setTitle('');
       setTitleModifiedByUser(false);
       setSelectedLang(selectedLanguage || 'auto');
+      setTranslateToChinese(globalTranslateToChinese);
       setShowAdvanced(false);
 
       // Validate preselected file if provided
@@ -152,7 +155,7 @@ export function ImportAudioDialog({
       // Fetch available models using centralized hook
       fetchModels();
     }
-  }, [open, preselectedFile, selectedLanguage, transcriptModelConfig, reset, resetSelection, validateFile, fetchModels]);
+  }, [open, preselectedFile, selectedLanguage, globalTranslateToChinese, transcriptModelConfig, reset, resetSelection, validateFile, fetchModels]);
 
   // Update title when fileInfo changes
   useEffect(() => {
@@ -192,7 +195,8 @@ export function ImportAudioDialog({
       title || fileInfo.filename,
       isParakeetModel ? null : selectedLang === 'auto' ? null : selectedLang,
       selectedModel?.name || null,
-      selectedModel?.provider || null
+      selectedModel?.provider || null,
+      translateToChinese
     );
   };
 
@@ -323,6 +327,26 @@ export function ImportAudioDialog({
                   </Button>
                   <p className="text-sm text-gray-500 mt-2">MP4, WAV, MP3, FLAC, OGG, MKV, WebM, WMA</p>
                 </div>
+              )}
+
+              {/* Chinese translation option */}
+              {fileInfo && (
+                <label className="flex items-start gap-2 p-3 border rounded-lg cursor-pointer hover:bg-gray-50">
+                  <input
+                    type="checkbox"
+                    checked={translateToChinese}
+                    onChange={(e) => setTranslateToChinese(e.target.checked)}
+                    disabled={isProcessing}
+                    className="mt-0.5 h-4 w-4 flex-shrink-0 rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
+                  />
+                  <span className="text-sm">
+                    <span className="font-medium text-gray-900">生成中文翻译 (Translate to Chinese)</span>
+                    <span className="block text-xs text-muted-foreground mt-0.5">
+                      Adds a Simplified Chinese translation under each transcript line. Non-Chinese
+                      speech only; runs locally and will make the import take longer.
+                    </span>
+                  </span>
+                </label>
               )}
 
               {/* Advanced options (collapsible) */}

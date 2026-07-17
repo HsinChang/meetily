@@ -3,40 +3,45 @@
 /// These templates are bundled into the binary and serve as fallbacks
 /// when custom templates are not available.
 
-/// Daily standup template for engineering/product teams
-pub const DAILY_STANDUP: &str = include_str!("../../../templates/daily_standup.json");
+/// Brief minutes: background + key points only (fits 1-2 pages)
+pub const GOV_BRIEF: &str = include_str!("../../../templates/gov_brief.json");
 
-/// Standard meeting notes template
-pub const STANDARD_MEETING: &str = include_str!("../../../templates/standard_meeting.json");
+/// Detailed minutes: attendees, background and the flow of the meeting
+pub const GOV_DETAILED: &str = include_str!("../../../templates/gov_detailed.json");
+
+/// Comprehensive report with analysis and recommendations, for supervisors
+pub const GOV_REPORT: &str = include_str!("../../../templates/gov_report.json");
 
 /// Registry of all built-in templates
 ///
 /// Maps template identifiers to their embedded JSON content
 pub fn get_builtin_templates() -> Vec<(&'static str, &'static str)> {
     vec![
-        ("daily_standup", DAILY_STANDUP),
-        ("standard_meeting", STANDARD_MEETING),
+        ("gov_brief", GOV_BRIEF),
+        ("gov_detailed", GOV_DETAILED),
+        ("gov_report", GOV_REPORT),
     ]
 }
 
 /// Get a built-in template by identifier
 ///
 /// # Arguments
-/// * `id` - Template identifier (e.g., "daily_standup", "standard_meeting")
+/// * `id` - Template identifier (e.g., "gov_brief", "gov_detailed", "gov_report")
 ///
 /// # Returns
 /// The template JSON content if found, None otherwise
 pub fn get_builtin_template(id: &str) -> Option<&'static str> {
     match id {
-        "daily_standup" => Some(DAILY_STANDUP),
-        "standard_meeting" => Some(STANDARD_MEETING),
+        "gov_brief" => Some(GOV_BRIEF),
+        "gov_detailed" => Some(GOV_DETAILED),
+        "gov_report" => Some(GOV_REPORT),
         _ => None,
     }
 }
 
 /// List all built-in template identifiers
 pub fn list_builtin_template_ids() -> Vec<&'static str> {
-    vec!["daily_standup", "standard_meeting"]
+    vec!["gov_brief", "gov_detailed", "gov_report"]
 }
 
 #[cfg(test)]
@@ -58,8 +63,9 @@ mod tests {
 
     #[test]
     fn test_get_builtin_template() {
-        assert!(get_builtin_template("daily_standup").is_some());
-        assert!(get_builtin_template("standard_meeting").is_some());
+        assert!(get_builtin_template("gov_brief").is_some());
+        assert!(get_builtin_template("gov_detailed").is_some());
+        assert!(get_builtin_template("gov_report").is_some());
         assert!(get_builtin_template("nonexistent").is_none());
     }
 }

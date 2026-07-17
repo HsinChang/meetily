@@ -303,7 +303,7 @@ pub fn extract_meeting_name_from_markdown(markdown: &str) -> Option<String> {
 /// * `api_key` - API key for the provider
 /// * `text` - Full transcript text to summarize
 /// * `custom_prompt` - Optional user-provided context
-/// * `template_id` - Template identifier (e.g., "daily_standup", "standard_meeting")
+/// * `template_id` - Template identifier (e.g., "gov_brief", "gov_detailed", "gov_report")
 /// * `token_threshold` - Token limit for single-pass processing (default 4000)
 /// * `ollama_endpoint` - Optional custom Ollama endpoint
 /// * `custom_openai_endpoint` - Optional custom OpenAI-compatible endpoint

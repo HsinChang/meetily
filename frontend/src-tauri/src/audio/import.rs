@@ -258,6 +258,7 @@ pub async fn start_import<R: Runtime>(
     language: Option<String>,
     model: Option<String>,
     provider: Option<String>,
+    translate_to_chinese: Option<bool>,
 ) -> Result<ImportResult> {
     // Acquire guard - ensures flag is cleared even on panic/early return
     let _guard = ImportGuard::acquire().map_err(|e| anyhow!(e))?;
@@ -273,6 +274,7 @@ pub async fn start_import<R: Runtime>(
         language,
         model,
         provider,
+        translate_to_chinese,
     )
     .await;
 
@@ -315,6 +317,7 @@ async fn run_import<R: Runtime>(
     language: Option<String>,
     model: Option<String>,
     provider: Option<String>,
+    translate_to_chinese: Option<bool>,
 ) -> Result<ImportResult> {
     let source = PathBuf::from(&source_path);
 
@@ -630,7 +633,49 @@ async fn run_import<R: Runtime>(
     emit_progress(&app, "saving", 85, "Creating meeting...");
 
     // Create transcript segments
-    let segments = create_transcript_segments(&all_transcripts);
+    let mut segments = create_transcript_segments(&all_transcripts);
+
+    // Generate Chinese translations for the imported transcript when requested.
+    // The import dialog passes an explicit choice; fall back to the global
+    // translate-to-Chinese toggle when unspecified.
+    let want_translation =
+        translate_to_chinese.unwrap_or_else(crate::get_translate_to_chinese_internal);
+    if want_translation {
+        emit_progress(&app, "translating", 88, "Translating to Chinese...");
+        if let Ok(app_data_dir) = app.path().app_data_dir() {
+            const TRANSLATION_MODEL: &str = "qwen3.5:4b";
+            const SYSTEM_PROMPT: &str = "You are a professional translator. Translate the user's text into Simplified Chinese. Output only the translation itself, with no explanations, notes, pinyin, or quotation marks.";
+            for segment in segments.iter_mut() {
+                if segment.text.trim().is_empty()
+                    || crate::summary::language_detection::is_probably_chinese(&segment.text)
+                {
+                    continue;
+                }
+                match crate::summary::summary_engine::generate_with_builtin(
+                    &app_data_dir,
+                    TRANSLATION_MODEL,
+                    SYSTEM_PROMPT,
+                    &segment.text,
+                    None,
+                )
+                .await
+                {
+                    Ok(translated) => {
+                        let translated = translated.trim().to_string();
+                        if !translated.is_empty() {
+                            segment.translation = Some(translated);
+                        }
+                    }
+                    Err(e) => warn!(
+                        "Import translation failed for segment {}: {}",
+                        segment.id, e
+                    ),
+                }
+            }
+        } else {
+            warn!("Import translation skipped: could not resolve app_data_dir");
+        }
+    }
 
     // Save to database
     let app_state = app
@@ -719,8 +764,8 @@ async fn create_meeting_with_transcripts(
     // Insert transcripts
     for segment in segments {
         sqlx::query(
-            "INSERT INTO transcripts (id, meeting_id, transcript, timestamp, audio_start_time, audio_end_time, duration)
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO transcripts (id, meeting_id, transcript, timestamp, audio_start_time, audio_end_time, duration, translation)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&segment.id)
         .bind(&meeting_id)
@@ -729,6 +774,7 @@ async fn create_meeting_with_transcripts(
         .bind(segment.audio_start_time)
         .bind(segment.audio_end_time)
         .bind(segment.duration)
+        .bind(&segment.translation)
         .execute(&mut *tx)
         .await
         .map_err(|e| anyhow!("Failed to insert transcript: {}", e))?;
@@ -968,6 +1014,7 @@ pub async fn start_import_audio_command<R: Runtime>(
     language: Option<String>,
     model: Option<String>,
     provider: Option<String>,
+    translate_to_chinese: Option<bool>,
 ) -> Result<ImportStarted, String> {
     // Check if import is already in progress (guard will be acquired in start_import)
     if IMPORT_IN_PROGRESS.load(Ordering::SeqCst) {
@@ -976,7 +1023,16 @@ pub async fn start_import_audio_command<R: Runtime>(
 
     // Spawn import in background
     tauri::async_runtime::spawn(async move {
-        let result = start_import(app, source_path, title, language, model, provider).await;
+        let result = start_import(
+            app,
+            source_path,
+            title,
+            language,
+            model,
+            provider,
+            translate_to_chinese,
+        )
+        .await;
 
         if let Err(e) = result {
             error!("Import failed: {}", e);
