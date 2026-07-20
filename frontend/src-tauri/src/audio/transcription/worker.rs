@@ -17,10 +17,34 @@ static SEQUENCE_COUNTER: AtomicU64 = AtomicU64::new(0);
 // Speech detection flag - reset per recording session
 static SPEECH_DETECTED_EMITTED: AtomicBool = AtomicBool::new(false);
 
+// Translation failures repeat once per segment, so the UI is notified only once
+// per recording session rather than on every segment.
+static TRANSLATION_ERROR_EMITTED: AtomicBool = AtomicBool::new(false);
+
 /// Reset the speech detected flag for a new recording session
 pub fn reset_speech_detected_flag() {
     SPEECH_DETECTED_EMITTED.store(false, Ordering::SeqCst);
+    TRANSLATION_ERROR_EMITTED.store(false, Ordering::SeqCst);
     info!("🔍 SPEECH_DETECTED_EMITTED reset to: {}", SPEECH_DETECTED_EMITTED.load(Ordering::SeqCst));
+}
+
+/// Surface a translation failure to the frontend once per recording session.
+///
+/// Translation is best-effort and must never interrupt transcription, but failing
+/// silently made a misconfigured model indistinguishable from "the feature is off".
+fn report_translation_unavailable<R: Runtime>(app: &AppHandle<R>, message: &str) {
+    warn!("Chinese translation unavailable: {}", message);
+
+    if TRANSLATION_ERROR_EMITTED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+
+    if let Err(e) = app.emit(
+        "translation-error",
+        serde_json::json!({ "message": message }),
+    ) {
+        error!("Failed to emit translation-error event: {}", e);
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -620,13 +644,20 @@ fn maybe_spawn_chinese_translation<R: Runtime>(
             }
         };
 
-        const TRANSLATION_MODEL: &str = "qwen3.5:4b";
-        const SYSTEM_PROMPT: &str = "You are a professional translator. Translate the user's text into Simplified Chinese. Output only the translation itself, with no explanations, notes, pinyin, or quotation marks.";
+        let Some(model) =
+            crate::audio::common::resolve_translation_model(&app, &app_data_dir).await
+        else {
+            report_translation_unavailable(
+                &app,
+                "No built-in AI model is installed. Download one in Settings to enable Chinese translation.",
+            );
+            return;
+        };
 
         match crate::summary::summary_engine::generate_with_builtin(
             &app_data_dir,
-            TRANSLATION_MODEL,
-            SYSTEM_PROMPT,
+            &model,
+            crate::audio::common::TRANSLATION_SYSTEM_PROMPT,
             &text,
             None,
         )
@@ -648,9 +679,9 @@ fn maybe_spawn_chinese_translation<R: Runtime>(
                 }
             }
             Err(e) => {
-                warn!(
-                    "Chinese translation failed for segment {}: {}",
-                    sequence_id, e
+                report_translation_unavailable(
+                    &app,
+                    &format!("Chinese translation failed (segment {}): {}", sequence_id, e),
                 );
             }
         }

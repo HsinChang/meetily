@@ -425,9 +425,24 @@ async fn run_retranscription<R: Runtime>(
     // when the translate-to-Chinese toggle is enabled (mirrors live recording).
     if crate::get_translate_to_chinese_internal() {
         emit_progress(&app, &meeting_id, "translating", 85, "Translating to Chinese...");
-        if let Ok(app_data_dir) = app.path().app_data_dir() {
-            const TRANSLATION_MODEL: &str = "qwen3.5:4b";
-            const SYSTEM_PROMPT: &str = "You are a professional translator. Translate the user's text into Simplified Chinese. Output only the translation itself, with no explanations, notes, pinyin, or quotation marks.";
+        // A missing app data dir or model skips translation only; the re-transcribed
+        // segments are still saved below.
+        let resolved = match app.path().app_data_dir() {
+            Ok(app_data_dir) => {
+                let model =
+                    crate::audio::common::resolve_translation_model(&app, &app_data_dir).await;
+                if model.is_none() {
+                    warn!("Retranscription translation skipped: no built-in AI model is installed");
+                }
+                model.map(|model| (app_data_dir, model))
+            }
+            Err(_) => {
+                warn!("Retranscription translation skipped: could not resolve app_data_dir");
+                None
+            }
+        };
+
+        if let Some((app_data_dir, model)) = resolved {
             for segment in segments.iter_mut() {
                 if segment.text.trim().is_empty()
                     || crate::summary::language_detection::is_probably_chinese(&segment.text)
@@ -436,8 +451,8 @@ async fn run_retranscription<R: Runtime>(
                 }
                 match crate::summary::summary_engine::generate_with_builtin(
                     &app_data_dir,
-                    TRANSLATION_MODEL,
-                    SYSTEM_PROMPT,
+                    &model,
+                    crate::audio::common::TRANSLATION_SYSTEM_PROMPT,
                     &segment.text,
                     None,
                 )
@@ -455,8 +470,6 @@ async fn run_retranscription<R: Runtime>(
                     ),
                 }
             }
-        } else {
-            warn!("Retranscription translation skipped: could not resolve app_data_dir");
         }
     }
 

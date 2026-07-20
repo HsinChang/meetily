@@ -389,6 +389,33 @@ export function TranscriptProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  // Surface translation failures. The Rust side emits this at most once per
+  // recording session, so a misconfigured or missing model is visible instead of
+  // looking like the feature is simply switched off.
+  useEffect(() => {
+    let unlistenFn: (() => void) | undefined;
+
+    const setupTranslationErrorListener = async () => {
+      try {
+        unlistenFn = await transcriptService.onTranslationError((payload) => {
+          toast.error('Chinese translation unavailable', {
+            description: payload.message,
+          });
+        });
+      } catch (error) {
+        console.error('❌ Failed to setup translation error listener:', error);
+      }
+    };
+
+    setupTranslationErrorListener();
+
+    return () => {
+      if (unlistenFn) {
+        unlistenFn();
+      }
+    };
+  }, []);
+
   // Sync transcript history and meeting name from backend on reload
   // This fixes the issue where reloading during active recording causes state desync
   useEffect(() => {

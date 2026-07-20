@@ -25,6 +25,10 @@ export interface ModelDownloadCompletePayload {
   modelName: string;
 }
 
+export interface TranslationError {
+  message: string;
+}
+
 /**
  * Transcript Service
  * Singleton service for managing transcription operations and transcript history
@@ -69,6 +73,20 @@ export class TranscriptService {
     callback: (translation: TranscriptTranslation) => void
   ): Promise<UnlistenFn> {
     return listen<TranscriptTranslation>('transcript-translation', (event) => {
+      callback(event.payload);
+    });
+  }
+
+  /**
+   * Listen for translation failures (missing model, sidecar error, ...).
+   * Emitted at most once per recording session.
+   * @param callback - Function to call when translation becomes unavailable
+   * @returns Promise that resolves to unlisten function
+   */
+  async onTranslationError(
+    callback: (payload: TranslationError) => void
+  ): Promise<UnlistenFn> {
+    return listen<TranslationError>('translation-error', (event) => {
       callback(event.payload);
     });
   }

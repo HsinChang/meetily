@@ -21,7 +21,12 @@ use tauri::{AppHandle, Manager, Runtime};
 
 /// Marker file written into the app-data models dir after a successful seed so we
 /// skip the (potentially large) directory walk on subsequent launches.
-const SEED_MARKER: &str = ".bundled-seeded-v1";
+///
+/// Bumped to v2 so installs seeded by the earlier version re-run once and pick up
+/// `link_summary_models`; their bundled GGUF was copied to a directory the model
+/// lookup never reads. The re-walk is cheap because `copy_dir_missing` skips files
+/// that already exist.
+const SEED_MARKER: &str = ".bundled-seeded-v2";
 
 /// Seed bundled models into the app-data models directory. Best-effort: any error
 /// is logged and swallowed so startup is never blocked by a copy failure.
@@ -72,6 +77,7 @@ pub fn seed_bundled_models<R: Runtime>(app: &AppHandle<R>) {
     match copy_dir_missing(&src_models, &dest_models) {
         Ok(copied) => {
             log::info!("[seed] Seed complete: {} file(s) copied", copied);
+            link_summary_models(&dest_models);
             // Write marker so we don't re-walk on next launch.
             if let Err(e) = fs::write(dest_models.join(SEED_MARKER), b"1") {
                 log::warn!("[seed] Failed to write seed marker: {}", e);
@@ -80,6 +86,52 @@ pub fn seed_bundled_models<R: Runtime>(app: &AppHandle<R>) {
         Err(e) => {
             // Leave the marker absent so a future launch can retry the seed.
             log::error!("[seed] Seed failed: {}", e);
+        }
+    }
+}
+
+/// Make bundled LLM GGUFs visible to the built-in AI model lookup.
+///
+/// The bundle lays the GGUF out at `models/<file>.gguf`, but the summary engine
+/// resolves models from `models/summary/` (see `summary_engine::models::
+/// get_models_directory`). Without this step a bundled model is seeded to a
+/// directory nothing reads, so summaries and translation both report "model not
+/// found" on a fresh install.
+///
+/// Hard-links where possible to avoid a second multi-GB copy, falling back to a
+/// real copy across filesystems. Never overwrites an existing file, so models the
+/// user downloaded through the UI are left alone.
+fn link_summary_models(dest_models: &Path) {
+    let summary_dir = dest_models.join("summary");
+
+    if let Err(e) = fs::create_dir_all(&summary_dir) {
+        log::warn!("[seed] Failed to create summary models dir: {}", e);
+        return;
+    }
+
+    let entries = match fs::read_dir(dest_models) {
+        Ok(entries) => entries,
+        Err(e) => {
+            log::warn!("[seed] Failed to read seeded models dir: {}", e);
+            return;
+        }
+    };
+
+    for entry in entries.flatten() {
+        let src = entry.path();
+        if src.extension().and_then(|ext| ext.to_str()) != Some("gguf") {
+            continue;
+        }
+
+        let dst = summary_dir.join(entry.file_name());
+        if dst.exists() {
+            log::debug!("[seed] Summary model already present: {}", dst.display());
+            continue;
+        }
+
+        match fs::hard_link(&src, &dst).or_else(|_| fs::copy(&src, &dst).map(|_| ())) {
+            Ok(()) => log::info!("[seed] Linked summary model {}", dst.display()),
+            Err(e) => log::warn!("[seed] Failed to link {}: {}", dst.display(), e),
         }
     }
 }

@@ -1,9 +1,12 @@
 use crate::api::TranscriptSegment;
+use crate::database::repositories::setting::SettingsRepository;
+use crate::state::AppState;
 use anyhow::Result;
 use log::{debug, info};
 use once_cell::sync::Lazy;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use tauri::{AppHandle, Manager, Runtime};
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
 use uuid::Uuid;
 
@@ -12,6 +15,36 @@ static ENGINE_LIFECYCLE_LOCK: Lazy<Arc<AsyncMutex<()>>> =
 
 pub(crate) async fn acquire_engine_lifecycle_lock() -> OwnedMutexGuard<()> {
     ENGINE_LIFECYCLE_LOCK.clone().lock_owned().await
+}
+
+/// System prompt shared by every Chinese-translation call site (live transcription,
+/// import, and retranscription) so they cannot drift apart.
+pub(crate) const TRANSLATION_SYSTEM_PROMPT: &str = "You are a professional translator. Translate the user's text into Simplified Chinese. Output only the translation itself, with no explanations, notes, pinyin, or quotation marks.";
+
+/// Resolve the built-in model to use for Chinese translation.
+///
+/// Translation always runs on the local sidecar, so it needs a built-in GGUF on
+/// disk regardless of which provider is configured for summaries. Previously each
+/// call site hard-coded `qwen3.5:4b`, which silently failed whenever the user had
+/// any other model installed. Returns `None` when no built-in model is available,
+/// so callers can report that instead of failing per segment.
+pub(crate) async fn resolve_translation_model<R: Runtime>(
+    app: &AppHandle<R>,
+    app_data_dir: &PathBuf,
+) -> Option<String> {
+    let preferred = configured_summary_model(app).await;
+    crate::summary::summary_engine::resolve_local_model(app_data_dir, preferred.as_deref())
+}
+
+/// The model recorded in the settings row, whatever provider it belongs to.
+/// `resolve_local_model` ignores it unless it names a built-in model that exists.
+async fn configured_summary_model<R: Runtime>(app: &AppHandle<R>) -> Option<String> {
+    let state = app.try_state::<AppState>()?;
+    let setting = SettingsRepository::get_model_config(state.db_manager.pool())
+        .await
+        .ok()
+        .flatten()?;
+    Some(setting.model)
 }
 
 /// Unload the transcription engine after a batch job (import or retranscription).

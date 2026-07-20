@@ -13,6 +13,7 @@ use std::sync::RwLock;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
+use super::commands::summary_model_priority;
 use super::models;
 use super::sidecar::SidecarManager;
 
@@ -74,6 +75,36 @@ async fn get_sidecar_manager() -> Result<Arc<SidecarManager>> {
     global_manager
         .clone()
         .ok_or_else(|| anyhow!("Sidecar manager not initialized. Call init_sidecar_manager first."))
+}
+
+/// Resolve a built-in model that is actually present on disk.
+///
+/// Auxiliary features such as real-time translation always run on the local
+/// sidecar, so they need a built-in GGUF even when summaries are configured
+/// against a remote provider (Ollama, Claude, ...). Prefers `preferred` — the
+/// configured summary model — when it is a built-in model that is present, so
+/// translation reuses the already-loaded model instead of forcing the sidecar to
+/// restart with a different one. Falls back to the best locally available model.
+///
+/// Returns `None` when no built-in model has been downloaded or seeded.
+pub fn resolve_local_model(app_data_dir: &PathBuf, preferred: Option<&str>) -> Option<String> {
+    let is_present = |name: &str| {
+        models::get_model_path(app_data_dir, name)
+            .map(|path| path.exists())
+            .unwrap_or(false)
+    };
+
+    if let Some(name) = preferred {
+        if is_present(name) {
+            return Some(name.to_string());
+        }
+    }
+
+    models::get_available_models()
+        .into_iter()
+        .filter(|model| is_present(&model.name))
+        .max_by_key(|model| summary_model_priority(&model.name))
+        .map(|model| model.name)
 }
 
 /// Get cached model path with read-through caching to avoid repeated filesystem I/O
@@ -301,6 +332,68 @@ pub async fn is_sidecar_healthy() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Create `models/summary/<gguf>` for each named model, mirroring what a
+    /// download or a correctly seeded bundle produces on disk.
+    fn install_models(app_data_dir: &PathBuf, names: &[&str]) {
+        for name in names {
+            let path = models::get_model_path(app_data_dir, name).expect("known model");
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, b"gguf").unwrap();
+        }
+    }
+
+    #[test]
+    fn resolve_local_model_returns_none_when_nothing_installed() {
+        let dir = tempfile::tempdir().unwrap();
+        let app_data_dir = dir.path().to_path_buf();
+
+        assert_eq!(resolve_local_model(&app_data_dir, Some("qwen3.5:4b")), None);
+    }
+
+    #[test]
+    fn resolve_local_model_prefers_configured_model_when_present() {
+        let dir = tempfile::tempdir().unwrap();
+        let app_data_dir = dir.path().to_path_buf();
+        install_models(&app_data_dir, &["qwen3.5:4b", "qwen3.5:2b"]);
+
+        // Reuses the configured model even though 4b outranks it, so translation
+        // does not force the sidecar to swap models mid-session.
+        assert_eq!(
+            resolve_local_model(&app_data_dir, Some("qwen3.5:2b")).as_deref(),
+            Some("qwen3.5:2b")
+        );
+    }
+
+    #[test]
+    fn resolve_local_model_falls_back_when_configured_model_is_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let app_data_dir = dir.path().to_path_buf();
+        install_models(&app_data_dir, &["qwen3.5:2b"]);
+
+        // The regression this fixes: a hard-coded/remote model that is not on disk
+        // must fall back to what is installed rather than failing every segment.
+        assert_eq!(
+            resolve_local_model(&app_data_dir, Some("qwen3.5:4b")).as_deref(),
+            Some("qwen3.5:2b")
+        );
+        assert_eq!(
+            resolve_local_model(&app_data_dir, Some("claude-opus-4-8")).as_deref(),
+            Some("qwen3.5:2b")
+        );
+    }
+
+    #[test]
+    fn resolve_local_model_picks_highest_priority_available() {
+        let dir = tempfile::tempdir().unwrap();
+        let app_data_dir = dir.path().to_path_buf();
+        install_models(&app_data_dir, &["qwen3.5:2b", "qwen3.5:4b", "gemma3:1b"]);
+
+        assert_eq!(
+            resolve_local_model(&app_data_dir, None).as_deref(),
+            Some("qwen3.5:4b")
+        );
+    }
 
     #[test]
     fn test_request_serialization() {
