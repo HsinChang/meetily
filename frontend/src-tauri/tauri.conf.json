@@ -95,8 +95,7 @@
             "icons/app_icon.ico"
         ],
         "resources": [
-            "templates/*.json",
-            "models/**/*"
+            "templates/*.json"
         ],
         "externalBin": [
             "binaries/llama-helper",
@@ -108,7 +107,10 @@
             "hardenedRuntime": true
         },
         "windows": {
-            "signCommand": "powershell -ExecutionPolicy Bypass -File scripts/sign-windows.ps1 -FilePath %1"
+            "signCommand": "powershell -ExecutionPolicy Bypass -File scripts/sign-windows.ps1 -FilePath %1",
+            "nsis": {
+                "installerHooks": "installer-hooks.nsh"
+            }
         }
     },
     "plugins": {

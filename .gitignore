@@ -5,6 +5,9 @@
 # dependencies
 /node_modules
 **/models
+**/models-excluded
+/dist-package
+*.zip
 /.pnp
 .pnp.*
 .yarn/*
