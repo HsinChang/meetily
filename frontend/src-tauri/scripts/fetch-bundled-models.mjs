@@ -9,6 +9,7 @@
 //   models/Qwen3.5-4B-Q4_K_M.gguf
 //   models/parakeet/parakeet-tdt-0.6b-v3-int8/{encoder-model.int8.onnx,
 //       decoder_joint-model.int8.onnx, nemo128.onnx, vocab.txt}
+//   models/funasr/fun-asr-nano-2512-q8/{funasr-encoder-f16.gguf, qwen3-0.6b-q8_0.gguf}
 //
 // This tree is registered as a Tauri resource (see tauri.conf.json
 // `bundle.resources`) and copied into the app-data models dir on first launch
@@ -18,6 +19,7 @@
 //   - whisper_engine/whisper_engine.rs (HF ggerganov/whisper.cpp)
 //   - summary/summary_engine/models.rs (HF unsloth Qwen3.5)
 //   - parakeet_engine/parakeet_engine.rs (meetily v3 mirror)
+//   - config.rs `funasr_model_files` (HF FunAudioLLM/Fun-ASR-Nano-GGUF)
 //
 // Usage:  node scripts/fetch-bundled-models.mjs
 // Existing files with a plausible size are skipped, so re-runs are cheap.
@@ -32,11 +34,13 @@ import { Readable } from 'node:stream';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const MODELS_DIR = resolve(__dirname, '..', 'models');
 const PARAKEET_DIR = join(MODELS_DIR, 'parakeet', 'parakeet-tdt-0.6b-v3-int8');
+const FUNASR_DIR = join(MODELS_DIR, 'funasr', 'fun-asr-nano-2512-q8');
 
 const WHISPER_BASE = 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main';
 const QWEN_BASE = 'https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/resolve/main';
 const PARAKEET_BASE =
   'https://meetily.towardsgeneralintelligence.com/models/parakeet-tdt-0.6b-v3-onnx';
+const FUNASR_BASE = 'https://huggingface.co/FunAudioLLM/Fun-ASR-Nano-GGUF/resolve/main';
 
 // dest (relative to MODELS_DIR) -> { url, minBytes } (minBytes guards partial files)
 const FILES = [
@@ -69,6 +73,18 @@ const FILES = [
     dest: 'parakeet/parakeet-tdt-0.6b-v3-int8/vocab.txt',
     url: `${PARAKEET_BASE}/vocab.txt`,
     minBytes: 5_000,
+  },
+  // Fun-ASR-Nano: Chinese-first ASR. minBytes must stay >= the thresholds in
+  // config.rs `funasr_model_files`, or the app treats a seeded file as truncated.
+  {
+    dest: 'funasr/fun-asr-nano-2512-q8/funasr-encoder-f16.gguf',
+    url: `${FUNASR_BASE}/funasr-encoder-f16.gguf`,
+    minBytes: 460_000_000, // ~469 MB
+  },
+  {
+    dest: 'funasr/fun-asr-nano-2512-q8/qwen3-0.6b-q8_0.gguf',
+    url: `${FUNASR_BASE}/qwen3-0.6b-q8_0.gguf`,
+    minBytes: 790_000_000, // ~805 MB
   },
 ];
 
@@ -139,6 +155,7 @@ async function download({ dest, url, minBytes }) {
 async function main() {
   console.log(`Fetching bundled models into ${MODELS_DIR}`);
   await mkdir(PARAKEET_DIR, { recursive: true });
+  await mkdir(FUNASR_DIR, { recursive: true });
   for (const file of FILES) {
     await download(file);
   }

@@ -60,6 +60,11 @@ cargo build --release -p llama-helper --features metal
 mkdir -p src-tauri/binaries
 cp ../target/release/llama-helper "src-tauri/binaries/llama-helper-${TARGET_TRIPLE}"
 
+# Build the funasr-helper sidecar (Fun-ASR-Nano Chinese transcription). CMake/C++ rather
+# than cargo — the SAN-M audio encoder is a hand-built ggml graph with no Rust binding.
+echo "Building funasr-helper sidecar..."
+../scripts/build-funasr-helper.sh
+
 # Build the Next.js application first
 echo "Building Next.js application..."
 pnpm run build

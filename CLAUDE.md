@@ -190,6 +190,66 @@ pub async fn load_model(&self, model_name: &str) -> Result<()> {
 - **Windows/Linux**: CUDA (NVIDIA), Vulkan (AMD/Intel), or CPU
 - Configure via Cargo features: `--features cuda`, `--features vulkan`
 
+### Transcription Providers
+
+Three local engines, selected by `transcript_settings.provider` in SQLite:
+
+| Provider | Engine | Notes |
+|---|---|---|
+| `localWhisper` | whisper-rs, in-process | Multilingual; degrades on noisy Mandarin |
+| `parakeet` | ONNX Runtime (`ort`), in-process | 25 **European** languages — no Chinese |
+| `funasr` | funasr-helper sidecar | Chinese-first (Fun-ASR-Nano 800M), dialects and accents |
+
+Whisper and Parakeet are reached through `TranscriptionEngine::{Whisper,Parakeet}`, which call
+their engines directly. **Fun-ASR is the only provider using the trait-based
+`TranscriptionEngine::Provider` path** — prefer that seam
+([audio/transcription/provider.rs](frontend/src-tauri/src/audio/transcription/provider.rs)) for any
+new engine; the worker loop already handles it without modification.
+
+Adding a provider means touching, at minimum:
+- `audio/transcription/engine.rs` — arms in **both** `validate_transcription_model_ready()` and
+  `get_or_init_transcription_engine()` (note the `"localWhisper" | _` catch-all must stay last)
+- `audio/common.rs` — a `BatchEngine` variant, so import and re-transcription can select it
+- `config.rs` — default model + catalog; mirror it in `src/constants/modelDefaults.ts`
+- `components/TranscriptSettings.tsx` and `hooks/useTranscriptionModels.ts` on the frontend
+
+### Fun-ASR Sidecar
+
+Fun-ASR's SAN-M audio encoder is a hand-built ggml graph with no Rust binding, so inference runs
+out-of-process in a C++ sidecar rather than in the Tauri core — see
+[funasr-helper/README.md](funasr-helper/README.md) for the protocol and the deltas from upstream.
+
+```bash
+./scripts/build-funasr-helper.sh     # -> frontend/src-tauri/binaries/funasr-helper-<triple>
+```
+
+This is a **CMake build, not cargo** — `funasr-helper` is deliberately outside the Cargo workspace,
+unlike `llama-helper`. `clean_build.sh` runs it; `clean_run.sh` does not, so for dev either run the
+script once or point `MEETILY_FUNASR_HELPER` at a binary.
+
+The sidecar holds models resident and unloads after `MEETILY_FUNASR_IDLE_TIMEOUT` (default 300 s).
+`MEETILY_FUNASR_NGL=0` disables GPU offload.
+
+### Model Bundling Differs Per Platform
+
+`bundle.resources` in [tauri.conf.json](frontend/src-tauri/tauri.conf.json) deliberately does **not**
+include `models/**/*`: WiX/MSI and NSIS both choke on multi-gigabyte files (~2 GB cabinet limit and a
+32-bit compiler mmap ceiling). Windows instead copies a sibling `models/` folder into app-data at
+install time via `installer-hooks.nsh`.
+
+macOS `.app`/`.dmg` has no such limit, so
+[tauri.macos.conf.json](frontend/src-tauri/tauri.macos.conf.json) re-adds `models/**/*` for macOS
+only — Tauri 2 merges `tauri.<platform>.conf.json` over the base config automatically. The macOS DMG
+is therefore ~5.4 GB and works offline on first launch; Windows/Linux download models on demand.
+
+**When adding a bundled model**, bump `SEED_MARKER` in
+[models_seed.rs](frontend/src-tauri/src/models_seed.rs). Existing installs short-circuit on the old
+marker and would never copy the new files, making the model look un-downloaded after an upgrade.
+
+**Gotcha**: Fun-ASR accuracy is sensitive to window length — short windows starve the LLM decoder of
+context. Benchmarked on a 611 s Mandarin recording, fixed ~15 s windows corrected 8/8 known error
+sites while ~2.5 s VAD segments managed 6/8. Prefer longer windows when changing segmentation.
+
 ## Critical Development Patterns
 
 ### 1. Audio Buffer Management

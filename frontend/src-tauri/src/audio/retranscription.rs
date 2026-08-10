@@ -101,11 +101,11 @@ pub async fn start_retranscription<R: Runtime>(
     // Reset cancellation flag
     RETRANSCRIPTION_CANCELLED.store(false, Ordering::SeqCst);
 
-    let use_parakeet = provider.as_deref() == Some("parakeet");
+    let batch_engine = super::common::BatchEngine::resolve(&app, provider.as_deref()).await;
     let result = run_retranscription(app.clone(), meeting_id.clone(), meeting_folder_path, language, model, provider).await;
 
     // Unload the engine after the batch job (success, failure, or cancellation)
-    super::common::unload_engine_after_batch(use_parakeet).await;
+    super::common::unload_engine_after_batch(batch_engine).await;
 
     // Guard will automatically clear flag on drop
     // No need for manual: RETRANSCRIPTION_IN_PROGRESS.store(false, Ordering::SeqCst);
@@ -180,8 +180,8 @@ async fn run_retranscription<R: Runtime>(
     let folder_path = PathBuf::from(&meeting_folder_path);
     let audio_path = find_audio_file(&folder_path)?;
 
-    // Determine which provider to use (default to whisper)
-    let use_parakeet = provider.as_deref() == Some("parakeet");
+    // Determine which provider to use (falls back to the configured provider)
+    let batch_engine = super::common::BatchEngine::resolve(&app, provider.as_deref()).await;
 
     info!(
         "Starting retranscription for meeting {} with language {:?}, model {:?}, provider {:?}",
@@ -299,13 +299,18 @@ async fn run_retranscription<R: Runtime>(
     emit_progress(&app, &meeting_id, "transcribing", 25, "Loading transcription engine...");
 
     // Initialize the appropriate engine once (not per-segment)
-    let whisper_engine = if !use_parakeet {
+    let whisper_engine = if batch_engine.is_whisper() {
         Some(get_or_init_whisper(&app, model.as_deref()).await?)
     } else {
         None
     };
-    let parakeet_engine = if use_parakeet {
+    let parakeet_engine = if batch_engine.is_parakeet() {
         Some(get_or_init_parakeet(&app, model.as_deref()).await?)
+    } else {
+        None
+    };
+    let funasr_engine = if batch_engine.is_funasr() {
+        Some(super::common::get_or_init_funasr(model.as_deref()).await?)
     } else {
         None
     };
@@ -368,12 +373,21 @@ async fn run_retranscription<R: Runtime>(
         }
 
         // Transcribe this segment
-        let (text, conf) = if use_parakeet {
+        let (text, conf) = if batch_engine.is_parakeet() {
             let engine = parakeet_engine.as_ref().unwrap();
             let text = engine
                 .transcribe_audio(segment.samples.clone())
                 .await
                 .map_err(|e| anyhow!("Parakeet transcription failed on segment {}: {}", i, e))?;
+            (text, 0.9f32)
+        } else if batch_engine.is_funasr() {
+            let engine = funasr_engine.as_ref().unwrap();
+            let text = engine
+                .transcribe_samples(segment.samples.clone())
+                .await
+                .map_err(|e| anyhow!("Fun-ASR transcription failed on segment {}: {}", i, e))?;
+            // Fun-ASR reports no confidence; use the same nominal value as Parakeet so
+            // downstream averaging stays comparable across engines.
             (text, 0.9f32)
         } else {
             let engine = whisper_engine.as_ref().unwrap();
@@ -657,12 +671,18 @@ async fn get_configured_whisper_model<R: Runtime>(app: &AppHandle<R>) -> Result<
         Some((provider, model)) => {
             info!("Found transcript config: provider={}, model={}", provider, model);
 
-            // Check if provider is Whisper-based
+            // Only reached on the Whisper path, and only when the caller named no model.
+            // A non-Whisper provider here means the configured model is for a different
+            // engine, so fall back to the default Whisper model rather than failing —
+            // the engine choice was already made by BatchEngine::resolve.
             if provider == "localWhisper" || provider == "whisper" {
                 Ok(model)
             } else {
-                error!("Retranscription requires Whisper provider, but configured provider is: {}", provider);
-                Err(anyhow!("Retranscription requires Whisper. Current provider '{}' does not support retranscription with language selection.", provider))
+                warn!(
+                    "Configured provider is '{}', not Whisper; using default Whisper model '{}'",
+                    provider, DEFAULT_WHISPER_MODEL
+                );
+                Ok(DEFAULT_WHISPER_MODEL.to_string())
             }
         },
         None => {

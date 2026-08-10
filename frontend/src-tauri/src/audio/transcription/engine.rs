@@ -135,10 +135,39 @@ pub async fn validate_transcription_model_ready<R: Runtime>(app: &AppHandle<R>) 
                 }
             }
         }
+        "funasr" => {
+            info!("🔍 Validating Fun-ASR model...");
+            if let Err(init_error) = crate::funasr_engine::commands::funasr_init().await {
+                warn!("❌ Failed to initialize Fun-ASR engine: {}", init_error);
+                return Err(format!(
+                    "Failed to initialize Fun-ASR speech recognition: {}",
+                    init_error
+                ));
+            }
+
+            // Loading spawns the sidecar and waits for its ready handshake, so a missing
+            // model or unbuildable helper surfaces here rather than mid-recording.
+            let model = if config.model.is_empty() {
+                crate::config::DEFAULT_FUNASR_MODEL.to_string()
+            } else {
+                config.model.clone()
+            };
+
+            match crate::funasr_engine::commands::funasr_validate_model_ready(Some(model.clone())).await {
+                Ok(()) => {
+                    info!("✅ Fun-ASR model validation successful: {} is ready", model);
+                    Ok(())
+                }
+                Err(e) => {
+                    warn!("❌ Fun-ASR model validation failed: {}", e);
+                    Err(e)
+                }
+            }
+        }
         other => {
             warn!("❌ Unsupported transcription provider for local recording: {}", other);
             Err(format!(
-                "Provider '{}' is not supported for local transcription. Please select 'localWhisper' or 'parakeet'.",
+                "Provider '{}' is not supported for local transcription. Please select 'localWhisper', 'parakeet' or 'funasr'.",
                 other
             ))
         }
@@ -210,6 +239,36 @@ pub async fn get_or_init_transcription_engine<R: Runtime>(
                 None => {
                     Err("Parakeet engine not initialized. This should not happen after validation.".to_string())
                 }
+            }
+        }
+        "funasr" => {
+            info!("🇨🇳 Initializing Fun-ASR transcription engine");
+
+            let engine = {
+                let guard = crate::funasr_engine::commands::FUNASR_ENGINE.lock().unwrap();
+                guard.as_ref().cloned()
+            };
+
+            match engine {
+                Some(engine) => {
+                    if engine.is_model_loaded().await {
+                        let model_name = engine
+                            .get_current_model()
+                            .await
+                            .unwrap_or_else(|| "unknown".to_string());
+                        info!("✅ Fun-ASR model '{}' already loaded", model_name);
+                        // The trait-based path: Fun-ASR is the first provider to use it.
+                        Ok(TranscriptionEngine::Provider(Arc::new(
+                            super::funasr_provider::FunAsrProvider::new(engine),
+                        )))
+                    } else {
+                        Err("Fun-ASR engine initialized but no model loaded. This should not happen after validation.".to_string())
+                    }
+                }
+                None => Err(
+                    "Fun-ASR engine not initialized. This should not happen after validation."
+                        .to_string(),
+                ),
             }
         }
         "localWhisper" | _ => {

@@ -47,10 +47,78 @@ async fn configured_summary_model<R: Runtime>(app: &AppHandle<R>) -> Option<Stri
     Some(setting.model)
 }
 
+/// Which transcription engine a batch job (import or retranscription) runs on.
+///
+/// This used to be a `use_parakeet: bool` threaded through both batch paths, which had no
+/// room for a third engine. Whisper stays the fallback for unknown provider strings, as
+/// it was under the boolean.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BatchEngine {
+    Whisper,
+    Parakeet,
+    FunAsr,
+}
+
+impl BatchEngine {
+    /// Map a provider string onto an engine. Accepts both the stored
+    /// `transcript_settings.provider` spelling ("localWhisper") and the frontend's
+    /// model-list spelling ("whisper"); anything unrecognised falls back to Whisper.
+    pub(crate) fn from_provider(provider: Option<&str>) -> Self {
+        match provider {
+            Some("parakeet") => Self::Parakeet,
+            Some("funasr") => Self::FunAsr,
+            _ => Self::Whisper,
+        }
+    }
+
+    /// Resolve the engine for a batch job, falling back to the configured provider when
+    /// the caller did not name one.
+    ///
+    /// Without this, leaving the model dropdown unset would route to Whisper even with
+    /// Fun-ASR configured — and then fail outright, because the Whisper path rejects a
+    /// non-Whisper provider when it reads the model name from the database.
+    pub(crate) async fn resolve<R: Runtime>(app: &AppHandle<R>, provider: Option<&str>) -> Self {
+        if let Some(p) = provider.filter(|p| !p.is_empty()) {
+            return Self::from_provider(Some(p));
+        }
+
+        let configured = async {
+            let state = app.try_state::<AppState>()?;
+            let row: Option<(String, String)> =
+                sqlx::query_as("SELECT provider, model FROM transcript_settings WHERE id = '1'")
+                    .fetch_optional(state.db_manager.pool())
+                    .await
+                    .ok()?;
+            row.map(|(provider, _)| provider)
+        }
+        .await;
+
+        match configured {
+            Some(p) => {
+                debug!("No provider passed for batch job, using configured provider '{}'", p);
+                Self::from_provider(Some(&p))
+            }
+            None => Self::Whisper,
+        }
+    }
+
+    pub(crate) fn is_parakeet(self) -> bool {
+        matches!(self, Self::Parakeet)
+    }
+
+    pub(crate) fn is_funasr(self) -> bool {
+        matches!(self, Self::FunAsr)
+    }
+
+    pub(crate) fn is_whisper(self) -> bool {
+        matches!(self, Self::Whisper)
+    }
+}
+
 /// Unload the transcription engine after a batch job (import or retranscription).
 /// Skips unloading if a live recording is currently in progress, since recording
 /// uses the same global engine instances.
-pub(crate) async fn unload_engine_after_batch(use_parakeet: bool) {
+pub(crate) async fn unload_engine_after_batch(engine: BatchEngine) {
     let _engine_lifecycle_guard = acquire_engine_lifecycle_lock().await;
 
     if crate::audio::recording_commands::is_recording().await {
@@ -58,25 +126,60 @@ pub(crate) async fn unload_engine_after_batch(use_parakeet: bool) {
         return;
     }
 
-    if use_parakeet {
-        use crate::parakeet_engine::commands::PARAKEET_ENGINE;
-        let engine = {
-            let guard = PARAKEET_ENGINE.lock().unwrap_or_else(|e| e.into_inner());
-            guard.as_ref().cloned()
-        };
-        if let Some(e) = engine {
-            e.unload_model().await;
+    match engine {
+        BatchEngine::Parakeet => {
+            use crate::parakeet_engine::commands::PARAKEET_ENGINE;
+            let engine = {
+                let guard = PARAKEET_ENGINE.lock().unwrap_or_else(|e| e.into_inner());
+                guard.as_ref().cloned()
+            };
+            if let Some(e) = engine {
+                e.unload_model().await;
+            }
         }
-    } else {
-        use crate::whisper_engine::commands::WHISPER_ENGINE;
-        let engine = {
-            let guard = WHISPER_ENGINE.lock().unwrap_or_else(|e| e.into_inner());
-            guard.as_ref().cloned()
-        };
-        if let Some(e) = engine {
-            e.unload_model().await;
+        BatchEngine::FunAsr => {
+            // Shuts down the sidecar process, releasing ~1.2 GB of resident memory.
+            use crate::funasr_engine::commands::FUNASR_ENGINE;
+            let engine = {
+                let guard = FUNASR_ENGINE.lock().unwrap_or_else(|e| e.into_inner());
+                guard.as_ref().cloned()
+            };
+            if let Some(e) = engine {
+                e.unload_model().await;
+            }
+        }
+        BatchEngine::Whisper => {
+            use crate::whisper_engine::commands::WHISPER_ENGINE;
+            let engine = {
+                let guard = WHISPER_ENGINE.lock().unwrap_or_else(|e| e.into_inner());
+                guard.as_ref().cloned()
+            };
+            if let Some(e) = engine {
+                e.unload_model().await;
+            }
         }
     }
+}
+
+/// Load a Fun-ASR model for a batch job and hand back the engine handle.
+pub(crate) async fn get_or_init_funasr(model: Option<&str>) -> Result<Arc<crate::funasr_engine::FunAsrEngine>> {
+    crate::funasr_engine::commands::funasr_init()
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to initialize Fun-ASR engine: {}", e))?;
+
+    let engine = {
+        let guard = crate::funasr_engine::commands::FUNASR_ENGINE
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        guard.as_ref().cloned()
+    }
+    .ok_or_else(|| anyhow::anyhow!("Fun-ASR engine not initialized"))?;
+
+    let model_name = model
+        .filter(|m| !m.is_empty())
+        .unwrap_or(crate::config::DEFAULT_FUNASR_MODEL);
+    engine.load_model(model_name).await?;
+    Ok(engine)
 }
 
 /// Create transcript segments from transcription results.

@@ -49,6 +49,7 @@ pub mod openai;
 pub mod anthropic;
 pub mod groq;
 pub mod openrouter;
+pub mod funasr_engine;
 pub mod parakeet_engine;
 pub mod state;
 pub mod summary;
@@ -494,6 +495,17 @@ pub fn run() {
                 }
             });
 
+            // Set Fun-ASR models directory
+            funasr_engine::commands::set_models_directory(&_app.handle());
+
+            // Initialize the Fun-ASR engine on startup. This only prepares model
+            // bookkeeping — the sidecar process is not spawned until a model is loaded.
+            tauri::async_runtime::spawn(async {
+                if let Err(e) = funasr_engine::commands::funasr_init().await {
+                    log::error!("Failed to initialize Fun-ASR engine on startup: {}", e);
+                }
+            });
+
             // Initialize ModelManager for summary engine (async, non-blocking)
             let app_handle_for_model_manager = _app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -605,6 +617,20 @@ pub fn run() {
             parakeet_engine::commands::parakeet_cancel_download,
             parakeet_engine::commands::parakeet_delete_corrupted_model,
             parakeet_engine::commands::open_parakeet_models_folder,
+            // Fun-ASR engine commands
+            funasr_engine::commands::funasr_init,
+            funasr_engine::commands::funasr_get_available_models,
+            funasr_engine::commands::funasr_load_model,
+            funasr_engine::commands::funasr_unload_model,
+            funasr_engine::commands::funasr_get_current_model,
+            funasr_engine::commands::funasr_is_model_loaded,
+            funasr_engine::commands::funasr_has_available_models,
+            funasr_engine::commands::funasr_validate_model_ready,
+            funasr_engine::commands::funasr_transcribe_audio,
+            funasr_engine::commands::funasr_get_models_directory,
+            funasr_engine::commands::funasr_download_model,
+            funasr_engine::commands::funasr_cancel_download,
+            funasr_engine::commands::funasr_delete_model,
             // Parallel processing commands
             whisper_engine::parallel_commands::initialize_parallel_processor,
             whisper_engine::parallel_commands::start_parallel_processing,

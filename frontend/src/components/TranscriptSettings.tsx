@@ -7,13 +7,19 @@ import { Label } from './ui/label';
 import { Eye, EyeOff, Lock, Unlock } from 'lucide-react';
 import { ModelManager } from './WhisperModelManager';
 import { ParakeetModelManager } from './ParakeetModelManager';
+import { FunAsrModelManager } from './FunAsrModelManager';
 
 
 export interface TranscriptModelProps {
-    provider: 'localWhisper' | 'parakeet' | 'deepgram' | 'elevenLabs' | 'groq' | 'openai';
+    provider: 'localWhisper' | 'parakeet' | 'funasr' | 'deepgram' | 'elevenLabs' | 'groq' | 'openai';
     model: string;
     apiKey?: string | null;
 }
+
+/** Providers that run locally: no API key, model chosen via their own manager component. */
+const LOCAL_PROVIDERS: ReadonlyArray<TranscriptModelProps['provider']> = ['localWhisper', 'parakeet', 'funasr'];
+
+const isLocalProvider = (p: TranscriptModelProps['provider']) => LOCAL_PROVIDERS.includes(p);
 
 export interface TranscriptSettingsProps {
     transcriptModelConfig: TranscriptModelProps;
@@ -34,7 +40,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
     }, [transcriptModelConfig.provider]);
 
     useEffect(() => {
-        if (transcriptModelConfig.provider === 'localWhisper' || transcriptModelConfig.provider === 'parakeet') {
+        if (isLocalProvider(transcriptModelConfig.provider)) {
             setApiKey(null);
         }
     }, [transcriptModelConfig.provider]);
@@ -53,6 +59,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
     const modelOptions = {
         localWhisper: [], // Model selection handled by ModelManager component
         parakeet: [], // Model selection handled by ParakeetModelManager component
+        funasr: [], // Model selection handled by FunAsrModelManager component
         deepgram: ['nova-2-phonecall'],
         elevenLabs: ['eleven_multilingual_v2'],
         groq: ['llama-3.3-70b-versatile'],
@@ -76,6 +83,17 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
             model: modelName
         });
         // Close modal after selection
+        if (onModelSelect) {
+            onModelSelect();
+        }
+    };
+
+    const handleFunAsrModelSelect = (modelName: string) => {
+        setTranscriptModelConfig({
+            ...transcriptModelConfig,
+            provider: 'funasr',
+            model: modelName
+        });
         if (onModelSelect) {
             onModelSelect();
         }
@@ -112,7 +130,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 onValueChange={(value) => {
                                     const provider = value as TranscriptModelProps['provider'];
                                     setUiProvider(provider);
-                                    if (provider !== 'localWhisper' && provider !== 'parakeet') {
+                                    if (!isLocalProvider(provider)) {
                                         fetchApiKey(provider);
                                     }
                                 }}
@@ -123,6 +141,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 <SelectContent>
                                     <SelectItem value="parakeet">⚡ Parakeet (Recommended - Real-time / Accurate)</SelectItem>
                                     <SelectItem value="localWhisper">🏠 Local Whisper (High Accuracy)</SelectItem>
+                                    <SelectItem value="funasr">🇨🇳 Fun-ASR (Chinese, dialects &amp; accents)</SelectItem>
                                     {/* <SelectItem value="deepgram">☁️ Deepgram (Backup)</SelectItem>
                                     <SelectItem value="elevenLabs">☁️ ElevenLabs</SelectItem>
                                     <SelectItem value="groq">☁️ Groq</SelectItem>
@@ -130,7 +149,7 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                 </SelectContent>
                             </Select>
 
-                            {uiProvider !== 'localWhisper' && uiProvider !== 'parakeet' && (
+                            {!isLocalProvider(uiProvider) && (
                                 <Select
                                     value={transcriptModelConfig.model}
                                     onValueChange={(value) => {
@@ -167,6 +186,16 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                             <ParakeetModelManager
                                 selectedModel={transcriptModelConfig.provider === 'parakeet' ? transcriptModelConfig.model : undefined}
                                 onModelSelect={handleParakeetModelSelect}
+                                autoSave={true}
+                            />
+                        </div>
+                    )}
+
+                    {uiProvider === 'funasr' && (
+                        <div className="mt-6">
+                            <FunAsrModelManager
+                                selectedModel={transcriptModelConfig.provider === 'funasr' ? transcriptModelConfig.model : undefined}
+                                onModelSelect={handleFunAsrModelSelect}
                                 autoSave={true}
                             />
                         </div>

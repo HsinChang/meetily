@@ -80,3 +80,15 @@ experiments/
 target/
 
 frontend/src-tauri/binaries/
+# funasr-helper CMake build tree (sidecar binary is staged into frontend/src-tauri/binaries/)
+/funasr-helper/build/
+
+# Large model weights are never committed — they are fetched by
+# frontend/src-tauri/scripts/fetch-bundled-models.mjs or downloaded in-app.
+# `**/models` above covers the model directories; these catch strays laid down
+# elsewhere, plus the .part files an interrupted fetch leaves behind.
+*.gguf
+*.onnx
+*.bin.part
+*.gguf.part
+*.onnx.part

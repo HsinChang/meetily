@@ -26,7 +26,11 @@ use tauri::{AppHandle, Manager, Runtime};
 /// `link_summary_models`; their bundled GGUF was copied to a directory the model
 /// lookup never reads. The re-walk is cheap because `copy_dir_missing` skips files
 /// that already exist.
-const SEED_MARKER: &str = ".bundled-seeded-v2";
+///
+/// Bumped to v3 for the bundled Fun-ASR-Nano models (`models/funasr/<name>/*.gguf`).
+/// Without a bump, every existing install short-circuits on the v2 marker and never
+/// copies them, leaving Fun-ASR looking un-downloaded on upgrade.
+const SEED_MARKER: &str = ".bundled-seeded-v3";
 
 /// Seed bundled models into the app-data models directory. Best-effort: any error
 /// is logged and swallowed so startup is never blocked by a copy failure.
