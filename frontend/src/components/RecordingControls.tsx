@@ -12,6 +12,7 @@ import Analytics from '@/lib/analytics';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { useConfig } from '@/contexts/ConfigContext';
 import { LANGUAGES } from '@/components/LanguageSelection';
+import { TranscriptionModelPicker } from '@/components/TranscriptionModelPicker';
 
 interface RecordingControlsProps {
   isRecording: boolean;
@@ -56,7 +57,12 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
     toggleTranslateToChinese,
     recordingMode,
     setRecordingMode,
+    transcriptModelConfig,
   } = useConfig();
+
+  // Fun-ASR transcribes Chinese only, so the language choice is not free when it is
+  // the active engine (see TranscriptionModelPicker).
+  const isFunAsr = transcriptModelConfig?.provider === 'funasr';
 
   const [showPlayback, setShowPlayback] = useState(false);
   const [recordingPath, setRecordingPath] = useState<string | null>(null);
@@ -383,6 +389,12 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
           </div>
         )}
 
+        {/* Transcription model. Pre-recording only: the engine is resolved once when
+            recording starts, so switching mid-recording would have no effect. */}
+        {!isRecording && !showPlayback && (
+          <TranscriptionModelPicker disabled={isStarting || isValidatingModel} />
+        )}
+
         {/* Language + real-time Chinese translation controls.
             Language is selectable only before recording (Whisper's language is
             fixed at start); the translation toggle works before AND during. */}
@@ -394,9 +406,9 @@ export const RecordingControls: React.FC<RecordingControlsProps> = ({
                 <select
                   value={selectedLanguage}
                   onChange={(e) => setSelectedLanguage(e.target.value)}
-                  disabled={isStarting || isValidatingModel}
+                  disabled={isStarting || isValidatingModel || isFunAsr}
                   className="bg-transparent text-gray-700 focus:outline-none max-w-[150px] cursor-pointer disabled:opacity-50"
-                  title="Transcription language"
+                  title={isFunAsr ? 'Fun-ASR transcribes Chinese audio' : 'Transcription language'}
                 >
                   {LANGUAGES.map((language) => (
                     <option key={language.code} value={language.code}>
