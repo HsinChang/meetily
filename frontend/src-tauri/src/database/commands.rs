@@ -141,35 +141,94 @@ pub async fn check_homebrew_database(path: String) -> Result<Option<DatabaseChec
     }
 }
 
-/// Import legacy database and initialize the database manager
+/// Known locations of a database left behind by the old Python/Homebrew Meetily.
+/// The Homebrew prefix differs between Intel and Apple Silicon.
+const LEGACY_DB_SEARCH_PATHS: &[&str] = &[
+    "/opt/homebrew/var/meetily/meeting_minutes.db",
+    "/usr/local/var/meetily/meeting_minutes.db",
+];
+
+/// Look for a database from a previous Meetily install, so the import prompt is only
+/// shown to users who actually have one.
+///
+/// `app_data/meeting_minutes.db` is deliberately not reported: `DatabaseManager::new`
+/// already migrates that automatically on first launch, so there is nothing to ask about.
+#[tauri::command]
+pub async fn find_legacy_database(_app: AppHandle) -> Result<Option<String>, String> {
+    for path in LEGACY_DB_SEARCH_PATHS {
+        if PathBuf::from(path).is_file() {
+            info!("Found legacy database: {}", path);
+            return Ok(Some(path.to_string()));
+        }
+    }
+    info!("No legacy database found");
+    Ok(None)
+}
+
+/// Import a legacy database, replacing the current one, then restart.
+///
+/// Since the app now always initializes a database at startup, `meeting_minutes.sqlite`
+/// exists by the time this runs — and `DatabaseManager::new` only migrates a legacy `.db`
+/// when the `.sqlite` is absent. Rather than duplicating that migration here, this stages
+/// the legacy file where the existing (and tested) migration path expects it, removes the
+/// freshly created database, and restarts so the migration runs on the next launch.
+///
+/// Refuses to run once the current database holds meetings, so an import can never
+/// destroy real data.
 #[tauri::command]
 pub async fn import_and_initialize_database(
     app: AppHandle,
     legacy_db_path: String,
 ) -> Result<(), String> {
-    info!(
-        "Starting import of legacy database from: {}",
-        legacy_db_path
-    );
+    info!("Starting import of legacy database from: {}", legacy_db_path);
 
-    // Import and get initialized manager
-    let db_manager = DatabaseManager::import_legacy_database(&app, &legacy_db_path)
-        .await
-        .map_err(|e| {
-            error!("Failed to import legacy database: {}", e);
-            format!("Failed to import database: {}", e)
-        })?;
+    if !PathBuf::from(&legacy_db_path).is_file() {
+        return Err(format!("No database at {}", legacy_db_path));
+    }
 
-    // Update app state with the new manager
-    app.manage(AppState { db_manager });
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
 
-    info!("Legacy database imported and initialized successfully");
+    // Guard: only import over an empty database.
+    if let Some(state) = app.try_state::<AppState>() {
+        let meetings: i64 = sqlx::query_scalar("SELECT count(*) FROM meetings")
+            .fetch_one(state.db_manager.pool())
+            .await
+            .unwrap_or(0);
+        if meetings > 0 {
+            return Err(format!(
+                "This install already has {} meeting(s). Importing would replace them, so it has been cancelled.",
+                meetings
+            ));
+        }
 
-    // Emit event to notify frontend that database is ready
-    app.emit("database-initialized", ())
-        .map_err(|e| format!("Failed to emit database-initialized event: {}", e))?;
+        // Checkpoint and close the pool before the file is removed underneath it.
+        if let Err(e) = state.db_manager.cleanup().await {
+            log::warn!("Database cleanup before import failed: {}", e);
+        }
+    }
 
-    Ok(())
+    // Stage the legacy file where DatabaseManager::new looks for it.
+    std::fs::copy(&legacy_db_path, app_data_dir.join("meeting_minutes.db"))
+        .map_err(|e| format!("Failed to copy legacy database: {}", e))?;
+
+    // Remove the empty database (and its WAL sidecars) so the migration is taken.
+    for name in [
+        "meeting_minutes.sqlite",
+        "meeting_minutes.sqlite-wal",
+        "meeting_minutes.sqlite-shm",
+    ] {
+        let p = app_data_dir.join(name);
+        if p.exists() {
+            std::fs::remove_file(&p)
+                .map_err(|e| format!("Failed to clear {}: {}", p.display(), e))?;
+        }
+    }
+
+    info!("Legacy database staged; restarting to complete the import");
+    app.restart();
 }
 
 /// Seed the model configuration a brand-new install starts with.
@@ -179,12 +238,33 @@ pub async fn import_and_initialize_database(
 /// than propagated: a missing default row is recoverable from the UI, whereas refusing to
 /// start is not.
 pub(crate) async fn apply_first_launch_defaults(pool: &sqlx::SqlitePool) {
+    // "First launch" is decided by the absence of meeting_minutes.sqlite, which is also
+    // true while a legacy database is being migrated into place. Writing defaults
+    // unconditionally then discards the imported configuration — it reset an imported
+    // `funasr` selection back to `parakeet`. Only seed what is missing.
+    let has_transcript_config: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM transcript_settings WHERE id = '1')")
+            .fetch_one(pool)
+            .await
+            .unwrap_or(false);
+    let has_model_config: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM settings WHERE id = '1')")
+            .fetch_one(pool)
+            .await
+            .unwrap_or(false);
+
+    if has_transcript_config && has_model_config {
+        info!("Existing configuration found (imported database?), leaving defaults alone");
+        return;
+    }
+
     let default_summary_model =
         crate::summary::summary_engine::commands::get_recommended_summary_model_for_current_system()
             .unwrap_or("qwen3.5:2b");
 
     // Default Summary Model: Built-in AI (Qwen recommendation for this system)
-    if let Err(e) = crate::database::repositories::setting::SettingsRepository::save_model_config(
+    if !has_model_config {
+      if let Err(e) = crate::database::repositories::setting::SettingsRepository::save_model_config(
         pool,
         "builtin-ai",
         default_summary_model,
@@ -206,6 +286,7 @@ pub(crate) async fn apply_first_launch_defaults(pool: &sqlx::SqlitePool) {
         .await
     {
         error!("Failed to set default transcription model config: {}", e);
+      }
     }
 }
 

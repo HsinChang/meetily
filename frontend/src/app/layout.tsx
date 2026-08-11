@@ -20,6 +20,7 @@ import { loadBetaFeatures } from '@/types/betaFeatures'
 import { DownloadProgressToastProvider } from '@/components/shared/DownloadProgressToast'
 import { UpdateCheckProvider } from '@/components/UpdateCheckProvider'
 import { RecordingPostProcessingProvider } from '@/contexts/RecordingPostProcessingProvider'
+import { LegacyDatabaseImport } from '@/components/DatabaseImport/LegacyDatabaseImport'
 import { ImportAudioDialog, ImportDropOverlay } from '@/components/ImportAudio'
 import { ImportDialogProvider } from '@/contexts/ImportDialogContext'
 import { isAudioExtension, getAudioFormatsDisplayList } from '@/constants/audioFormats'
@@ -66,6 +67,26 @@ export default function RootLayout({
 }: {
   children: React.ReactNode
 }) {
+  // Offer to import a database from the old Python/Homebrew Meetily, but only on a first
+  // launch and only when one is actually present — this is not a setup wizard.
+  const [showLegacyImport, setShowLegacyImport] = useState(false)
+
+  useEffect(() => {
+    let unlisten: UnlistenFn | undefined
+    listen('first-launch-detected', async () => {
+      try {
+        const legacyPath = await invoke<string | null>('find_legacy_database')
+        if (legacyPath) {
+          console.log('[Layout] Legacy database found, offering import:', legacyPath)
+          setShowLegacyImport(true)
+        }
+      } catch (error) {
+        console.error('[Layout] Legacy database check failed:', error)
+      }
+    }).then((fn) => { unlisten = fn })
+    return () => { unlisten?.() }
+  }, [])
+
   // Import audio state
   const [showDropOverlay, setShowDropOverlay] = useState(false)
   const [showImportDialog, setShowImportDialog] = useState(false)
@@ -209,6 +230,11 @@ export default function RootLayout({
                                 <Sidebar />
                                 <MainContent>{children}</MainContent>
                               </div>
+                              <LegacyDatabaseImport
+                                isOpen={showLegacyImport}
+                                onComplete={() => setShowLegacyImport(false)}
+                              />
+
                               {/* Import audio overlay and dialog */}
                               <ImportDropOverlay visible={showDropOverlay} />
                               <ConditionalImportDialog
