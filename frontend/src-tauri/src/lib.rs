@@ -44,7 +44,6 @@ pub mod database;
 pub mod notifications;
 pub mod models_seed;
 pub mod ollama;
-pub mod onboarding;
 pub mod openai;
 pub mod anthropic;
 pub mod groq;
@@ -781,10 +780,6 @@ pub fn run() {
             database::commands::open_database_folder,
             whisper_engine::commands::open_models_folder,
             // Onboarding commands
-            onboarding::get_onboarding_status,
-            onboarding::save_onboarding_status_cmd,
-            onboarding::reset_onboarding_status_cmd,
-            onboarding::complete_onboarding,
             // System settings commands
             #[cfg(target_os = "macos")]
             utils::open_system_settings,

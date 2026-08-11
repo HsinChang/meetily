@@ -7,6 +7,7 @@ import { useRecordingState, RecordingStatus } from '@/contexts/RecordingStateCon
 import { recordingService } from '@/services/recordingService';
 import Analytics from '@/lib/analytics';
 import { showRecordingNotification } from '@/lib/recordingNotification';
+import { ensureRecordingPermissions } from '@/lib/recordingPermissions';
 import { toast } from 'sonner';
 
 interface UseRecordingStartReturn {
@@ -130,7 +131,16 @@ export function useRecordingStart(
         return;
       }
 
-      console.log('Transcription model ready - setting up meeting title and state');
+      console.log('Transcription model ready - checking recording permissions');
+
+      // Permissions are requested here rather than up front (the onboarding wizard that
+      // used to do it is gone); macOS will not prompt for Screen Recording on its own.
+      if (!(await ensureRecordingPermissions(recordingMode))) {
+        setStatus(RecordingStatus.IDLE);
+        return;
+      }
+
+      console.log('Permissions ready - setting up meeting title and state');
 
       const randomTitle = generateMeetingTitle();
       setMeetingTitle(randomTitle);
@@ -196,6 +206,12 @@ export function useRecordingStart(
               showModal?.('modelSelector', 'Transcription model setup required');
               Analytics.trackButtonClick('start_recording_blocked_missing', 'sidebar_auto');
             }
+            setStatus(RecordingStatus.IDLE);
+            setIsAutoStarting(false);
+            return;
+          }
+
+          if (!(await ensureRecordingPermissions(recordingMode))) {
             setStatus(RecordingStatus.IDLE);
             setIsAutoStarting(false);
             return;
@@ -286,6 +302,12 @@ export function useRecordingStart(
           showModal?.('modelSelector', 'Transcription model setup required');
           Analytics.trackButtonClick('start_recording_blocked_missing', 'sidebar_direct');
         }
+        setStatus(RecordingStatus.IDLE);
+        setIsAutoStarting(false);
+        return;
+      }
+
+      if (!(await ensureRecordingPermissions(recordingMode))) {
         setStatus(RecordingStatus.IDLE);
         setIsAutoStarting(false);
         return;
