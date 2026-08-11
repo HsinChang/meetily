@@ -43,6 +43,18 @@ if [ -n "${FETCHCONTENT_SOURCE_DIR_LLAMA:-}" ]; then
     CMAKE_FLAGS+=("-DFETCHCONTENT_SOURCE_DIR_LLAMA=$FETCHCONTENT_SOURCE_DIR_LLAMA")
 fi
 
+# CMake caches FETCHCONTENT_SOURCE_DIR_LLAMA in CMakeCache.txt. If a previous run
+# pointed it at a checkout that has since been deleted (a temp dir, a cleaned
+# workspace), CMake fails outright rather than falling back to fetching, so drop the
+# stale build tree and reconfigure.
+if [ -f "$BUILD/CMakeCache.txt" ]; then
+    cached_llama="$(sed -n 's/^FETCHCONTENT_SOURCE_DIR_LLAMA:[^=]*=//p' "$BUILD/CMakeCache.txt" | head -1)"
+    if [ -n "$cached_llama" ] && [ ! -d "$cached_llama" ]; then
+        echo "Cached llama.cpp source dir is gone ($cached_llama); reconfiguring from scratch."
+        rm -rf "$BUILD"
+    fi
+fi
+
 echo "Building funasr-helper sidecar (gpu=$GPU, target=$TARGET_TRIPLE)..."
 cmake -B "$BUILD" -S "$SRC" "${CMAKE_FLAGS[@]}"
 cmake --build "$BUILD" -j
