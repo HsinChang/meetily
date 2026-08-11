@@ -50,20 +50,47 @@ pnpm install
 echo "Fetching bundled models..."
 node src-tauri/scripts/fetch-bundled-models.mjs
 
+# MEETILY_UNIVERSAL=1 builds a universal (arm64 + x86_64) macOS app. Sidecars must then
+# exist for both architectures, since Tauri only lipos the main binary itself.
+UNIVERSAL="${MEETILY_UNIVERSAL:-0}"
+TARGET_TRIPLE=$(rustc -vV | awk '/host:/ {print $2}')
+mkdir -p src-tauri/binaries
+
 # Build the llama-helper sidecar (local LLM inference for summaries + translation)
 # and place it in binaries/ with the target-triple suffix Tauri's externalBin expects.
 # (CI does this too; the local build needs it or bundling fails with
 #  "resource path 'binaries/llama-helper-...' doesn't exist".)
 echo "Building llama-helper sidecar..."
-TARGET_TRIPLE=$(rustc -vV | awk '/host:/ {print $2}')
-cargo build --release -p llama-helper --features metal
-mkdir -p src-tauri/binaries
-cp ../target/release/llama-helper "src-tauri/binaries/llama-helper-${TARGET_TRIPLE}"
+if [ "$UNIVERSAL" = "1" ]; then
+    # Metal is an Apple Silicon concern here; the Intel slice builds CPU-only.
+    cargo build --release -p llama-helper --features metal --target aarch64-apple-darwin
+    cargo build --release -p llama-helper --target x86_64-apple-darwin
+    cp ../target/aarch64-apple-darwin/release/llama-helper "src-tauri/binaries/llama-helper-aarch64-apple-darwin"
+    cp ../target/x86_64-apple-darwin/release/llama-helper "src-tauri/binaries/llama-helper-x86_64-apple-darwin"
+else
+    cargo build --release -p llama-helper --features metal
+    cp ../target/release/llama-helper "src-tauri/binaries/llama-helper-${TARGET_TRIPLE}"
+fi
 
 # Build the funasr-helper sidecar (Fun-ASR-Nano Chinese transcription). CMake/C++ rather
 # than cargo — the SAN-M audio encoder is a hand-built ggml graph with no Rust binding.
 echo "Building funasr-helper sidecar..."
-../scripts/build-funasr-helper.sh
+if [ "$UNIVERSAL" = "1" ]; then
+    MEETILY_ARCHS="arm64 x86_64" ../scripts/build-funasr-helper.sh
+else
+    ../scripts/build-funasr-helper.sh
+fi
+
+if [ "$UNIVERSAL" = "1" ]; then
+    # src-tauri's build script downloads ffmpeg for whichever target it is invoked with,
+    # so the Intel copy only appears once something has been built for x86_64. Run a check
+    # to trigger it now; the lipo step below needs both copies present.
+    echo "Fetching x86_64 ffmpeg via build script..."
+    (cd src-tauri && cargo check --target x86_64-apple-darwin --quiet) || true
+
+    echo "Combining sidecars into universal binaries..."
+    ../scripts/lipo-sidecars.sh
+fi
 
 # Build the Next.js application first
 echo "Building Next.js application..."
@@ -72,6 +99,13 @@ pnpm run build
 # Set environment variables for the build
 
 echo "Building Tauri app..."
-pnpm run tauri build
+if [ "$UNIVERSAL" = "1" ]; then
+    # `tauri build -- <args>` forwards <args> to cargo (see the tauri:build:* scripts), and
+    # cargo has no "universal-apple-darwin" target spec — only the Tauri CLI understands it.
+    # So it must be passed to tauri itself, before any `--`.
+    pnpm exec tauri build --target universal-apple-darwin
+else
+    pnpm run tauri build
+fi
 sleep
 

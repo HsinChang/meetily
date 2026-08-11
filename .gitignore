@@ -82,6 +82,7 @@ target/
 frontend/src-tauri/binaries/
 # funasr-helper CMake build tree (sidecar binary is staged into frontend/src-tauri/binaries/)
 /funasr-helper/build/
+/funasr-helper/build-*/
 
 # Large model weights are never committed — they are fetched by
 # frontend/src-tauri/scripts/fetch-bundled-models.mjs or downloaded in-app.

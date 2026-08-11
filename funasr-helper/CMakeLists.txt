@@ -10,6 +10,17 @@
 # Reuse an existing llama.cpp checkout instead of fetching (much faster rebuilds):
 #   -DFETCHCONTENT_SOURCE_DIR_LLAMA=/path/to/llama.cpp
 cmake_minimum_required(VERSION 3.16)
+
+# Match the deployment target the app is built with (see
+# frontend/src-tauri/.cargo/config.toml). This build runs outside cargo, so it does not
+# inherit that config — and without an explicit value CMake targets the *host* OS. That
+# shipped a sidecar stamped `minos 26.0` inside an app targeting 14.2, which dyld refuses
+# to load on anything older, silently breaking Fun-ASR for all but the newest macOS.
+# Must be set before project().
+if(APPLE AND NOT CMAKE_OSX_DEPLOYMENT_TARGET)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "14.2" CACHE STRING "Minimum macOS version" FORCE)
+endif()
+
 project(funasr-helper CXX C)
 
 set(CMAKE_CXX_STANDARD 17)
