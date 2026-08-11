@@ -172,6 +172,43 @@ pub async fn import_and_initialize_database(
     Ok(())
 }
 
+/// Seed the model configuration a brand-new install starts with.
+///
+/// Shared by `initialize_fresh_database` and the startup path in `super::setup`, which
+/// both have to produce the same defaults for a first launch. Failures are logged rather
+/// than propagated: a missing default row is recoverable from the UI, whereas refusing to
+/// start is not.
+pub(crate) async fn apply_first_launch_defaults(pool: &sqlx::SqlitePool) {
+    let default_summary_model =
+        crate::summary::summary_engine::commands::get_recommended_summary_model_for_current_system()
+            .unwrap_or("qwen3.5:2b");
+
+    // Default Summary Model: Built-in AI (Qwen recommendation for this system)
+    if let Err(e) = crate::database::repositories::setting::SettingsRepository::save_model_config(
+        pool,
+        "builtin-ai",
+        default_summary_model,
+        "large-v3", // Default whisper model (unused for builtin but required)
+        None,
+    )
+    .await
+    {
+        error!("Failed to set default summary model config: {}", e);
+    }
+
+    // Default Transcription Model: Parakeet
+    if let Err(e) =
+        crate::database::repositories::setting::SettingsRepository::save_transcript_config(
+            pool,
+            "parakeet",
+            crate::config::DEFAULT_PARAKEET_MODEL,
+        )
+        .await
+    {
+        error!("Failed to set default transcription model config: {}", e);
+    }
+}
+
 /// Initialize a fresh database (for users who don't want to import)
 #[tauri::command]
 pub async fn initialize_fresh_database(app: AppHandle) -> Result<(), String> {
@@ -187,31 +224,7 @@ pub async fn initialize_fresh_database(app: AppHandle) -> Result<(), String> {
     // Update app state with the new manager
     app.manage(AppState { db_manager: db_manager.clone() });
 
-    // Set default model configuration for fresh installs
-    let pool = db_manager.pool();
-    
-    let default_summary_model = crate::summary::summary_engine::commands::get_recommended_summary_model_for_current_system()
-        .unwrap_or("qwen3.5:2b");
-
-    // Default Summary Model: Built-in AI (Qwen recommendation for this system)
-    if let Err(e) = crate::database::repositories::setting::SettingsRepository::save_model_config(
-        pool,
-        "builtin-ai",
-        default_summary_model,
-        "large-v3", // Default whisper model (unused for builtin but required)
-        None,
-    ).await {
-        error!("Failed to set default summary model config: {}", e);
-    }
-
-    // Default Transcription Model: Parakeet
-    if let Err(e) = crate::database::repositories::setting::SettingsRepository::save_transcript_config(
-        pool,
-        "parakeet",
-        crate::config::DEFAULT_PARAKEET_MODEL,
-    ).await {
-        error!("Failed to set default transcription model config: {}", e);
-    }
+    apply_first_launch_defaults(db_manager.pool()).await;
 
     info!("Fresh database initialized successfully with default models");
 

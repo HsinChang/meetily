@@ -12,27 +12,36 @@ pub async fn initialize_database_on_startup(app: &AppHandle) -> Result<(), Strin
         .await
         .map_err(|e| format!("Failed to check first launch status: {}", e))?;
 
-    if is_first_launch {
-        info!("First launch detected - will notify window when ready");
+    // The database is initialized here on every launch, including the first.
+    //
+    // First launch used to be deferred: this function emitted `first-launch-detected` and
+    // left AppState unmanaged, relying on the onboarding wizard to call
+    // `initialize_fresh_database` once the user finished setup. Removing the wizard removed
+    // that call, so a fresh install came up with no managed state and every state-backed
+    // command failed with "state not managed for field `state` on command ...". Existing
+    // installs were unaffected, which is why it only showed up on a clean machine.
+    let db_manager = DatabaseManager::new_from_app_handle(app)
+        .await
+        .map_err(|e| format!("Failed to initialize database manager: {}", e))?;
 
-        // Delay event emission to ensure window is ready and React listeners are registered
+    let pool = db_manager.pool().clone();
+    app.manage(AppState { db_manager });
+
+    if is_first_launch {
+        info!("First launch detected - seeding default configuration");
+        super::commands::apply_first_launch_defaults(&pool).await;
+
+        // Still emitted for any listener; delayed so the window and its React listeners
+        // are up. Nothing depends on it for initialization any more.
         let app_handle = app.clone();
         tauri::async_runtime::spawn(async move {
             tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-            app_handle
-                .emit("first-launch-detected", ())
-                .expect("Failed to emit first-launch-detected event");
-            info!("Emitted first-launch-detected after delay");
+            if let Err(e) = app_handle.emit("first-launch-detected", ()) {
+                log::warn!("Failed to emit first-launch-detected event: {}", e);
+            }
         });
-    } else {
-        // Normal flow - initialize database immediately
-        let db_manager = DatabaseManager::new_from_app_handle(app)
-            .await
-            .map_err(|e| format!("Failed to initialize database manager: {}", e))?;
-
-        app.manage(AppState { db_manager });
-        info!("Database initialized successfully");
     }
 
+    info!("Database initialized successfully");
     Ok(())
 }
