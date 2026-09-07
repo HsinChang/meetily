@@ -65,9 +65,13 @@ use tokio::sync::RwLock;
 
 static RECORDING_FLAG: AtomicBool = AtomicBool::new(false);
 
-// Global language preference storage (default to "auto-translate" for automatic translation to English)
+// Global language preference storage. The frontend syncs the user's real choice on
+// mount; this default only applies until then. It must match the frontend's own
+// default ("auto", see ConfigContext) — "auto-translate" meant that any gap in that
+// sync silently transcribed into English on Whisper, and made Fun-ASR reject every
+// chunk as an unsupported language.
 static LANGUAGE_PREFERENCE: std::sync::LazyLock<StdMutex<String>> =
-    std::sync::LazyLock::new(|| StdMutex::new("auto-translate".to_string()));
+    std::sync::LazyLock::new(|| StdMutex::new("auto".to_string()));
 
 // When true, finalized non-Chinese transcript segments are translated to Simplified
 // Chinese in real time via the built-in Qwen sidecar (see audio/transcription/worker.rs).

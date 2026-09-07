@@ -618,24 +618,26 @@ pub async fn api_get_transcript_config<R: Runtime>(
                 &config.provider,
                 &config.model
             );
-            match SettingsRepository::get_transcript_api_key(pool, &config.provider).await {
-                Ok(api_key) => {
-                    log_info!("Successfully retrieved transcript config and API key.");
-                    Ok(Some(TranscriptConfig {
-                        provider: config.provider,
-                        model: config.model,
-                        api_key,
-                    }))
-                }
+            // A missing/unknown API-key column must not discard the config: callers
+            // read an Err here as "no config" and fall back to Parakeet, which
+            // silently transcribed Chinese audio with an English-only engine.
+            let api_key = match SettingsRepository::get_transcript_api_key(pool, &config.provider).await {
+                Ok(api_key) => api_key,
                 Err(e) => {
                     log_error!(
-                        "Failed to get transcript API key for provider {}: {}",
+                        "Failed to get transcript API key for provider {} (continuing without it): {}",
                         &config.provider,
                         e
                     );
-                    Err(e.to_string())
+                    None
                 }
-            }
+            };
+            log_info!("Successfully retrieved transcript config.");
+            Ok(Some(TranscriptConfig {
+                provider: config.provider,
+                model: config.model,
+                api_key,
+            }))
         }
         Ok(None) => {
             log_info!("No transcript config found, returning default.");

@@ -671,6 +671,33 @@ pub async fn stop_recording<R: Runtime>(
                 warn!("⚠️ No Parakeet engine found to unload model");
             }
         }
+        Some("funasr") => {
+            // Without this arm Fun-ASR fell through to the Whisper branch, leaving the
+            // sidecar (and its resident model) alive until its idle timeout expired.
+            info!("🇨🇳 Unloading Fun-ASR model...");
+            let engine_clone = {
+                let engine_guard = crate::funasr_engine::commands::FUNASR_ENGINE
+                    .lock()
+                    .unwrap();
+                engine_guard.as_ref().cloned()
+            };
+
+            if let Some(engine) = engine_clone {
+                let current_model = engine
+                    .get_current_model()
+                    .await
+                    .unwrap_or_else(|| "unknown".to_string());
+                info!("Current Fun-ASR model before unload: '{}'", current_model);
+
+                if engine.unload_model().await {
+                    info!("✅ Fun-ASR model '{}' unloaded successfully", current_model);
+                } else {
+                    warn!("⚠️ Failed to unload Fun-ASR model '{}'", current_model);
+                }
+            } else {
+                warn!("⚠️ No Fun-ASR engine found to unload model");
+            }
+        }
         _ => {
             // Default to Whisper
             info!("🎤 Unloading Whisper model...");
